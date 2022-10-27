@@ -2155,15 +2155,15 @@ point_lighting_main:
     vand    $v2, $v2, $v31[7]            // 0x7FFF; not sure why AND rather than clamp
     vmrg    $v20, $v20, $v0[0]           // Zero elements 3 and 7 of light color
 .if celshading == 1
-    andi    $11, $10, G_SHADEGTOA             // Is shade green to alpha enabled? (cel shading)
+    andi    $11, $10, G_SHADEGTOA        // Is shade green to alpha enabled? (cel shading)
 .endif
-    vmulf   ltColor, ltColor, $v31[7]         // Load light color to accumulator (0x7FFF = 0.5 b/c unsigned?)
+    vmulf   ltColor, ltColor, $v31[7]    // Load light color to accumulator (0x7FFF = 0.5 b/c unsigned?)
 .if celshading == 1
     beqz    $11, light_skipcel_point
 .endif
-    vmacf   ltColor, $v2, $v20[0h]            // + light color * dot product
+    vmacf   ltColor, $v2, $v20[0h]       // + light color * dot product
 .if celshading == 1
-    vmrg    ltColor, ltColor, ltColor[1h]     // Set elements 3 and 7 (alpha) to elements 1 and 5 (green)
+    vmrg    ltColor, ltColor, ltColor[1h] // Set elements 3 and 7 (alpha) to elements 1 and 5 (green)
 light_skipcel_point:
 .endif
     suv     ltColor[0], 0x0008(inputVtxPos) // Store new RGBARGBA for two verts
@@ -2190,10 +2190,12 @@ lights_dircoloraccum2:
     addi    $11, curLight, -lightSize    // Subtract 1 light for comparison at bottom of loop
     vmacu   $v28, vPairNZ, $v20[2h]      // + vtx n Y only * light dir 2n Y
     addi    curLight, curLight, -(2 * lightSize)
+.if celshading == 0
     vmrg    ltColor, ltColor, vPairXYZA  // select orig alpha
     mtc2    $zero, $v4[6]                // light 2n+1 color comp 3 = 0 (to not interfere with alpha)
     vmrg    $v3, $v3, $v0[0]             // light 2n color components 3,7 = 0
     mtc2    $zero, $v4[14]               // light 2n+1 color comp 7 = 0 (to not interfere with alpha)
+.endif
     vand    $v21, $v21, $v31[7]          // 0x7FFF; not sure why AND rather than clamp
     lpv     $v2[0], (ltBufOfs + 0x10)(curLight) // Normal for light or lookat next slot down, 2n+1
     vand    $v28, $v28, $v31[7]          // 0x7FFF; not sure why AND rather than clamp
@@ -2204,7 +2206,17 @@ lights_dircoloraccum2:
      vmacf  ltColor, $v3, $v28[0h]       // + color 2n * dot product
 // End of loop for even number of lights
     vmrg    $v3, $v0, $v31[5]            // INSTR 3: Setup for texgen: 0x4000 or zero in pattern 11101110
+    
+.if celshading == 1
+lights_effects:
+    andi    $11, $10, G_SHADEGTOA        // Is shade green to alpha enabled? (cel shading)
+    vmrg    ltColor, ltColor, vPairXYZA  // select orig alpha
+    beqz    $11, lights_texgenpre
+.endif
     llv     vPairST[4], (inputVtxSize + 8)(inputVtxPos)  // INSTR 2: load the texture coords of the 2nd vertex into v22[4-7]
+.if celshading == 1
+    vmrg    ltColor, ltColor, ltColor[1h] // Set elements 3 and 7 (alpha) to elements 1 and 5 (green)
+.endif
     
 lights_texgenpre:
 // Texgen beginning
@@ -2242,15 +2254,26 @@ lights_texgenmain:
      vmacf  vPairST, $v4, $v3           // + ST squared * (ST + ST * coeff)
 
 lights_finishone:
+.if celshading == 0
     vmrg    ltColor, ltColor, vPairXYZA // select orig alpha
     vmrg    $v4, $v4, $v0[0]            // clear alpha component of color
+.endif
     vand    $v21, $v21, $v31[7]         // 0x7FFF; not sure why AND rather than clamp
+.if celshading == 0
     veq     $v3, $v31, $v31[3h]         // set VCC to 00010001, opposite of 2 light case
+.endif
     lpv     $v2[0], (ltBufOfs - 2 * lightSize + 0x10)(curLight) // Load second dir down, lookat 0, for texgen
     vmrg    $v3, $v0, $v31[5]           // INSTR 3: Setup for texgen: 0x4000 or zero in OPPOSITE pattern 00010001
+.if celshading == 0
     llv     vPairST[4], (inputVtxSize + 8)(inputVtxPos)  // INSTR 2: load the texture coords of the 2nd vertex into v22[4-7]
+.endif
     vmulf   ltColor, ltColor, $v31[7]   // Move cur color to accumulator
+.if celshading == 1
+    vxor    $v4, $v3, $v31[5]           // Invert v4 (so that VCC is not changed)
+    j       lights_effects
+.else
     j       lights_texgenpre
+.endif
      vmacf  ltColor, $v4, $v21[0h]      // + light color * dot product
 
 .align 8
