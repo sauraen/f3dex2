@@ -960,6 +960,9 @@ G_VTX_handler:
     jal     dma_read_write                  // DMA read the vertices from DRAM
      addi   $19, $1, -1                     // Set up the DMA length
     lhu     $5, geometryModeLabel           // Load the geometry mode into $5
+.if celshading == 1
+    lhu     $10, geometryModeLabel+2        // Load lower short of geometry mode into $10; can be also used by future mods
+.endif
     srl     $1, $1, 3
     sub     outputVtxPos, cmd_w0, $1
     lhu     outputVtxPos, (vertexTable)(outputVtxPos)
@@ -1958,8 +1961,18 @@ next_light_dirorpoint:
     vmrg    ltColor, ltColor, vPairXYZACopy   // Select original alpha
     vand    $v20, $v20, $v31[7]               // 0x7FFF; not sure why AND rather than clamp
     vmrg    $v2, $v2, $v0[0]                  // Set elements 3 and 7 of light RGB to 0
+.if celshading == 1
+    andi    $11, $10, G_SHADEGTOA             // Is shade green to alpha enabled? (cel shading)
+.endif
     vmulf   ltColor, ltColor, $v31[7]         // Load light color to accumulator (0x7FFF = 0.5 b/c unsigned?)
+.if celshading == 1
+    beqz    $11, light_skipcel_pointdir
+.endif
     vmacf   ltColor, $v2, $v20[0h]            // + light color * dot product
+.if celshading == 1
+    vmrg    ltColor, ltColor, ltColor[1h]     // Set elements 3 and 7 (alpha) to elements 1 and 5 (green)
+light_skipcel_pointdir:
+.endif
     suv     ltColor[0], 8(inputVtxPos)        // Store new light color of two verts RGBARGBA
     bne     curLight, spFxBaseReg, next_light_dirorpoint // If at start of lights, done
      addi   curLight, curLight, -lightSize
@@ -2141,8 +2154,18 @@ point_lighting_main:
     vmrg    ltColor, ltColor, vPairXYZACopy // Merge alpha; vPairXYZACopy = v28 = mvTc1f, but A was not overwritten
     vand    $v2, $v2, $v31[7]            // 0x7FFF; not sure why AND rather than clamp
     vmrg    $v20, $v20, $v0[0]           // Zero elements 3 and 7 of light color
-    vmulf   ltColor, ltColor, $v31[7]    // Load light color to accumulator (0x7FFF = 0.5 b/c unsigned?)
-    vmacf   ltColor, $v20, $v2[0h]       // + light color * light amount
+.if celshading == 1
+    andi    $11, $10, G_SHADEGTOA             // Is shade green to alpha enabled? (cel shading)
+.endif
+    vmulf   ltColor, ltColor, $v31[7]         // Load light color to accumulator (0x7FFF = 0.5 b/c unsigned?)
+.if celshading == 1
+    beqz    $11, light_skipcel_point
+.endif
+    vmacf   ltColor, $v2, $v20[0h]            // + light color * dot product
+.if celshading == 1
+    vmrg    ltColor, ltColor, ltColor[1h]     // Set elements 3 and 7 (alpha) to elements 1 and 5 (green)
+light_skipcel_point:
+.endif
     suv     ltColor[0], 0x0008(inputVtxPos) // Store new RGBARGBA for two verts
     bne     curLight, spFxBaseReg, next_light_dirorpoint
      addi   curLight, curLight, -lightSize
