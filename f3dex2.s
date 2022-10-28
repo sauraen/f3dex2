@@ -2161,7 +2161,7 @@ point_lighting_main:
 .if celshading == 1
     beqz    $11, light_skipcel_point
 .endif
-    vmacf   ltColor, $v2, $v20[0h]       // + light color * dot product
+    vmacf   ltColor, $v20, $v2[0h]       // + light color * dot product
 .if celshading == 1
     vmrg    ltColor, ltColor, ltColor[1h] // Set elements 3 and 7 (alpha) to elements 1 and 5 (green)
 light_skipcel_point:

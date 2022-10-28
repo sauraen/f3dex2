@@ -18,7 +18,7 @@ NoN ?= 1
 VERSION ?= 2.08J
 
 # Set to 1 to enable cel shading, algorithm by Sauraen and glank.
-CELSHADING ?= 0
+CELSHADING ?= 1
 
 ARMIPS ?= armips
 
