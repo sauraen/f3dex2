@@ -1931,6 +1931,19 @@ mvTc1f equ $v28
 mvTc2f equ $v31
 
 light_vtx:
+
+    // TODO
+    vPairNXY equ $v27 // Assume start here XXXX YYYY 0000 0000 XXXX YYYY 0000 0000 as signed
+    vand    $v2, vPairNXY, $v31[3]            // 0x7F00; positive X, Y
+    vadd    $v20, $v2, $v2[0q]                // elem 0, 4: pos X + pos Y
+    vxor    vPairNX, $v2, $v31[3]             // 0x7F00 - pos X, 0x7F00 - pos Y
+    vxor    vPairNZ, $v20, $v31[3]            // elem 0, 4: 0x7F00 - pos X - pos Y
+    vge     vPairNY, $v0, $v20[0h]            // set 0-3, 4-7 VCC if (pos X + pos Y) zero or negative, discard result
+    vmrg    vPairNX, vPairNX, $v2             // If so, use 0x7F00 - pos X, else pos X (same for Y)
+    vabs    vPairNX, vPairNXY, vPairNX        // Apply sign of vPairNXY to vPairNX
+    vor     vPairNY, $v0, vPairNX[1h]         // Move Y to final register
+
+
     vadd    vPairNY, $v0, vPairRGBA[1h]       // Move vertex normals Y to separate reg
 .if UCODE_HAS_POINT_LIGHTING
     luv     ltColor[0], (ltBufOfs + lightSize + 0)(curLight) // Load next light color (ambient)
