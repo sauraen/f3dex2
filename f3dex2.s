@@ -2164,26 +2164,24 @@ point_lighting_main:
     vrcpl   $v2[0], $v29[0]              // Reciprocal = inversely proportional
     vrcph   $v2[4], $v2[4]
     vrcpl   $v2[4], $v29[4]
+.if celshading == 0
     luv     ltColor[0], 0x0008(inputVtxPos) // Get current RGBARGBA for two verts
+.endif
     vand    $v2, $v2, $v31[7]            // 0x7FFF; not sure why AND rather than clamp
     vmulf   $v2, $v2, $v20               // Inverse dist factor * dot product (elems 0, 4)
     luv     $v20[0], (ltBufOfs + 0)(curLight) // Light color RGB_RGB_
+.if celshading == 0
     vmrg    ltColor, ltColor, vPairAlpha37 // Select orig alpha; vPairAlpha37 = v28 = mvTc1f, but alphas were not overwritten
+.endif
     vand    $v2, $v2, $v31[7]            // 0x7FFF; not sure why AND rather than clamp
+.if celshading == 0
     vmrg    $v20, $v20, $v0[0]           // Zero elements 3 and 7 of light color
-.if celshading == 1
-    andi    $11, $10, G_SHADEGTOA        // Is shade green to alpha enabled? (cel shading)
 .endif
     vmulf   ltColor, ltColor, $v31[7]    // Load light color to accumulator (0x7FFF = 0.5 b/c unsigned?)
-.if celshading == 1
-    beqz    $11, light_skipcel_point
-.endif
     vmacf   ltColor, $v20, $v2[0h]       // + light color * dot product
-.if celshading == 1
-    vmrg    ltColor, ltColor, ltColor[1h] // Set elements 3 and 7 (alpha) to elements 1 and 5 (green)
-light_skipcel_point:
-.endif
+.if celshading == 0
     suv     ltColor[0], 0x0008(inputVtxPos) // Store new RGBARGBA for two verts
+.endif
     bne     curLight, spFxBaseReg, next_light_dirorpoint
      addi   curLight, curLight, -lightSize
     j       return_from_point_lights
@@ -2226,7 +2224,7 @@ lights_dircoloraccum2:
 .if celshading == 1
 lights_effects:
     // What should be set by here:
-    // ltColor, vPairRGBA, v2 = lookat 0, v20 = lookat 1, VCC = 11101110
+    // ltColor, vPairRGBA, v20 = lookat 0, v2 = lookat 1, VCC = 11101110
     // INSTR 1, INSTR 2, INSTR 3 not done, ltColor not stored
 .endif
     vmrg    $v3, $v0, $v31[5]            // INSTR 3: Setup for texgen: 0x4000 in elems 3, 7
