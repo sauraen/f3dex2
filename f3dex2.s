@@ -1930,41 +1930,38 @@ mvTc2f equ $v31
 light_vtx:
 
 .if vnormalscolors == 1
-    lhu     $10, geometryModeLabel+2          // Load lower short of geometry mode into $10; used by mods below
-    lhu     $12, (0x6)(inputVtxPos)           // Load first vert's packed normals
-    // 1 cycle
-    andi    $11, $10, G_NORMALSCOLORS         // Normals in fourth short of vtx
-    beqz    $11, no_normals_colors
-    lhu     $11, (inputVtxSize + 0x6)(inputVtxPos) // Second vert's packed normals
-    // 1 cycle
-    spv     $v0, (0x8)(inputVtxPos)           // Clear in-between bytes A, B, E, F
-    sh      $12, 0x8(inputVtxPos)             // Store to bytes 8, 9
-    sh      $11, 0xC(inputVtxPos)             // Store to bytes C, D
     // Temp names
     vPairNXY equ $v27
-    nMain equ $v7 // also vPairRGBATemp = output
-    nPosXY equ $v6 
-    nSqr equ $v5
-    lpv     vPairNXY, 0x8(inputVtxPos)        // XXXX YYYY 0000 0000 XXXX YYYY 0000 0000 as signed
+    nMain equ $v7 // also vPairRGBATemp = vPairNX = need X in elems 0, 4
+    nPosXY equ $v6
+    nSqr equ $v6 // nPosXY lifetime ends first
+    
+    lhu     $10, geometryModeLabel+2          // Load lower short of geometry mode into $10; used by mods below
+    lpv     $v20, 0(inputVtxPos)              // Vert 0 packed normals in elems 6-7
+    lpv     vPairNXY, (inputVtxSize)(inputVtxPos) // Vert 1 packed normals in elems 6-7
+    andi    $11, $10, G_NORMALSCOLORS         // Normals in fourth short of vtx
+    beqz    $11, no_normals_colors
+    vmov    vPairNXY[2], $v20[6]              // V0 X in elem 3; g = garbage
+    vmov    vPairNXY[3], $v20[7]              // gggg gggg XXXX YYYY gggg gggg XXXX YYYY as signed
     // 3 cycles
     vand    nPosXY, vPairNXY, $v31[3]         // 0x7F00; positive X, Y
     // 3 cycles
-    vaddc   $v20, nPosXY, nPosXY[1q]          // elem 0, 4: pos X + pos Y, no clamping
+    vaddc   $v20, nPosXY, nPosXY[1q]          // elem 2, 6: pos X + pos Y, no clamping
     vadd    $v2, $v0, $v0                     // Save carry bit, indicates use 0x7F00 - x and y
     vxor    nMain, nPosXY, $v31[3]            // 0x7F00 - +X, 0x7F00 - +Y
     // 2 cycles
-    vne     $v2, $v0, $v2[0h]                 // set 0-3, 4-7 VCC if (pos X + pos Y) negative, discard result
-    vxor    $v20, $v20, $v31[3]               // Z = 0x7F00 - +X - +Y in elems 0, 4
+    vne     $v2, $v0, $v2[2h]                 // set 0-3, 4-7 VCC if (pos X + pos Y) negative, discard result
+    vxor    $v20, $v20, $v31[3]               // Z = 0x7F00 - +X - +Y in elems 2, 6
     vmrg    nMain, nMain, nPosXY              // If so, use 0x7F00 - pos X, else pos X (same for Y)
-    vne     $v2, $v31, $v31[2h]               // Set VCC to 11011101
     // 2 cycles
+    vor     vPairNZ, $v0, $v20[2h]            // Copy Z to 0-3, 4-7 (need it in 0, 4)
     vmulf   nSqr, nMain, nMain                // X**2, Y**2
     vabs    nMain, vPairNXY, nMain            // Apply sign of original X and Y to new X and Y
-    vmulf   $v2, $v20, $v20                   // Z**2 in elems 0, 4
-    // 1 cycle
-    vmacf   $v2, vOne, nSqr[0h]               // + X**2
-    vmacf   nSqr, vOne, nSqr[1h]              // + Y**2
-    vmrg    nMain, nMain, $v20[0h]            // X Y Z 0 X Y Z 0
+    vmulf   $v2, $v20, $v20                   // Z**2 in elems 2, 6
+    vne     $v2, $v31, $v31[0h]               // Set VCC to 01110111
+    vmacf   $v2, vOne, nSqr[2h]               // + X**2
+    vmacf   nSqr, vOne, nSqr[3h]              // + Y**2
+    vmrg    nMain, nMain, nMain[2h]           // Move X to elems 0, 4
     
 
 no_normals_colors:
@@ -1976,11 +1973,7 @@ no_normals_colors:
     lpv     $v20[0], (ltBufOfs - lightSize + 0x10)(curLight) // Load next below transformed light direction as XYZ_XYZ_ for lights_dircoloraccum2
 .endif
     vadd    vPairNZ, $v0, vPairRGBATemp[2h]   // Move vertex normals Z to separate reg
-.if vnormalscolors == 1
-    vor     vPairRGBA, vPairRGBATemp, $v0     // This memory has been clobbered, but it's in the reg
-.else
     luv     vPairRGBA[0], 8(inputVtxPos)      // Load both verts' XYZAXYZA as unsigned
-.endif
     vne     $v4, $v31, $v31[3h]               // Set VCC to 11101110
 .if UCODE_HAS_POINT_LIGHTING
     andi    $11, $5, G_LIGHTING_POSITIONAL_H  // check if point lighting is enabled in the geometry mode
