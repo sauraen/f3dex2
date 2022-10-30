@@ -761,7 +761,7 @@ savedNearclip equ $29
 vPairMVPPosI equ $v24
 vPairMVPPosF equ $v23
 vPairST equ $v22
-vPairRGBA equ $v7
+vPairRGBATemp equ $v7
 
 Overlay3Address:
     li      $11, overlayInfo2       // set up a load for overlay 2
@@ -960,9 +960,6 @@ G_VTX_handler:
     jal     dma_read_write                  // DMA read the vertices from DRAM
      addi   $19, $1, -1                     // Set up the DMA length
     lhu     $5, geometryModeLabel           // Load the geometry mode into $5
-.if celshading == 1
-    lhu     $10, geometryModeLabel+2        // Load lower short of geometry mode into $10; can be also used by future mods
-.endif
     srl     $1, $1, 3
     sub     outputVtxPos, cmd_w0, $1
     lhu     outputVtxPos, (vertexTable)(outputVtxPos)
@@ -1030,7 +1027,7 @@ vertices_process_pair:
     vmadn   $v29, mxc1f, $v20[1h]
     sw      $11, 8(inputVtxPos)                    // Move the first vertex's colors/normals into the word before the second vertex's
     vmadh   $v29, mxc1i, $v20[1h]
-    lpv     vPairRGBA[0], 8(inputVtxPos)           // Load both vertex's colors/normals into v7's elements RGBARGBA or XYZAXYZA
+    lpv     vPairRGBATemp[0], 8(inputVtxPos)       // Load both vertex's colors/normals into v7's elements RGBARGBA or XYZAXYZA
     vmadn   vPairMVPPosF, mxc2f, $v20[2h]          // vPairMVPPosF = MVP * vpos result frac
     bnez    tmpCurLight, light_vtx                 // Zero if lighting disabled, pointer if enabled
      vmadh  vPairMVPPosI, mxc2i, $v20[2h]          // vPairMVPPosI = MVP * vpos result int
@@ -1916,9 +1913,9 @@ Continue_LightDirMVTransposeNormalize:
 
 curMatrix equ $12
 ltColor equ $v29
-vPairXYZA equ $v27
-vPairXYZACopy equ $v28
-vPairNX equ $v7 // also named vPairRGBA; with name vPairNX, only uses X components
+vPairRGBA equ $v27
+vPairAlpha37 equ $v28 // Same as mvTc1f, but alpha values are left in elems 3, 7
+vPairNX equ $v7 // also named vPairRGBATemp; with name vPairNX, uses X components = elems 0, 4
 vPairNY equ $v6
 vPairNZ equ $v5
 
@@ -1932,33 +1929,67 @@ mvTc2f equ $v31
 
 light_vtx:
 
-    // TODO
-    vPairNXY equ $v27 // Assume start here XXXX YYYY 0000 0000 XXXX YYYY 0000 0000 as signed
-    vand    $v2, vPairNXY, $v31[3]            // 0x7F00; positive X, Y
-    vadd    $v20, $v2, $v2[0q]                // elem 0, 4: pos X + pos Y
-    vxor    vPairNX, $v2, $v31[3]             // 0x7F00 - pos X, 0x7F00 - pos Y
-    vxor    vPairNZ, $v20, $v31[3]            // elem 0, 4: 0x7F00 - pos X - pos Y
-    vge     vPairNY, $v0, $v20[0h]            // set 0-3, 4-7 VCC if (pos X + pos Y) zero or negative, discard result
-    vmrg    vPairNX, vPairNX, $v2             // If so, use 0x7F00 - pos X, else pos X (same for Y)
-    vabs    vPairNX, vPairNXY, vPairNX        // Apply sign of vPairNXY to vPairNX
-    vor     vPairNY, $v0, vPairNX[1h]         // Move Y to final register
+.if vnormalscolors == 1
+    lhu     $10, geometryModeLabel+2          // Load lower short of geometry mode into $10; used by mods below
+    lhu     $12, (0x6)(inputVtxPos)           // Load first vert's packed normals
+    // 1 cycle
+    andi    $11, $10, G_NORMALSCOLORS         // Normals in fourth short of vtx
+    beqz    $11, no_normals_colors
+    lhu     $11, (inputVtxSize + 0x6)(inputVtxPos) // Second vert's packed normals
+    // 1 cycle
+    spv     $v0, (0x8)(inputVtxPos)           // Clear in-between bytes A, B, E, F
+    sh      $12, 0x8(inputVtxPos)             // Store to bytes 8, 9
+    sh      $11, 0xC(inputVtxPos)             // Store to bytes C, D
+    // Temp names
+    vPairNXY equ $v27
+    nMain equ $v7 // also vPairRGBATemp = output
+    nPosXY equ $v6 
+    nSqr equ $v5
+    lpv     vPairNXY, 0x8(inputVtxPos)        // XXXX YYYY 0000 0000 XXXX YYYY 0000 0000 as signed
+    // 3 cycles
+    vand    nPosXY, vPairNXY, $v31[3]         // 0x7F00; positive X, Y
+    // 3 cycles
+    vaddc   $v20, nPosXY, nPosXY[1q]          // elem 0, 4: pos X + pos Y, no clamping
+    vadd    $v2, $v0, $v0                     // Save carry bit, indicates use 0x7F00 - x and y
+    vxor    nMain, nPosXY, $v31[3]            // 0x7F00 - +X, 0x7F00 - +Y
+    // 2 cycles
+    vne     $v2, $v0, $v2[0h]                 // set 0-3, 4-7 VCC if (pos X + pos Y) negative, discard result
+    vxor    $v20, $v20, $v31[3]               // Z = 0x7F00 - +X - +Y in elems 0, 4
+    vmrg    nMain, nMain, nPosXY              // If so, use 0x7F00 - pos X, else pos X (same for Y)
+    vne     $v2, $v31, $v31[2h]               // Set VCC to 11011101
+    // 2 cycles
+    vmulf   nSqr, nMain, nMain                // X**2, Y**2
+    vabs    nMain, vPairNXY, nMain            // Apply sign of original X and Y to new X and Y
+    vmulf   $v2, $v20, $v20                   // Z**2 in elems 0, 4
+    // 1 cycle
+    vmacf   $v2, vOne, nSqr[0h]               // + X**2
+    vmacf   nSqr, vOne, nSqr[1h]              // + Y**2
+    vmrg    nMain, nMain, $v20[0h]            // X Y Z 0 X Y Z 0
+    
 
-
-    vadd    vPairNY, $v0, vPairRGBA[1h]       // Move vertex normals Y to separate reg
+no_normals_colors:
+.endif
+    vadd    vPairNY, $v0, vPairRGBATemp[1h]   // Move vertex normals Y to separate reg
 .if UCODE_HAS_POINT_LIGHTING
     luv     ltColor[0], (ltBufOfs + lightSize + 0)(curLight) // Load next light color (ambient)
 .else
     lpv     $v20[0], (ltBufOfs - lightSize + 0x10)(curLight) // Load next below transformed light direction as XYZ_XYZ_ for lights_dircoloraccum2
 .endif
-    vadd    vPairNZ, $v0, vPairRGBA[2h]       // Move vertex normals Z to separate reg
-    luv     vPairXYZA[0], 8(inputVtxPos)      // Load both verts' XYZAXYZA as unsigned
+    vadd    vPairNZ, $v0, vPairRGBATemp[2h]   // Move vertex normals Z to separate reg
+.if vnormalscolors == 1
+    vor     vPairRGBA, vPairRGBATemp, $v0     // This memory has been clobbered, but it's in the reg
+.else
+    luv     vPairRGBA[0], 8(inputVtxPos)      // Load both verts' XYZAXYZA as unsigned
+.endif
     vne     $v4, $v31, $v31[3h]               // Set VCC to 11101110
 .if UCODE_HAS_POINT_LIGHTING
     andi    $11, $5, G_LIGHTING_POSITIONAL_H  // check if point lighting is enabled in the geometry mode
     beqz    $11, directional_lighting         // If not enabled, use directional algorithm for everything
      li     curMatrix, mvpMatrix + 0x8000     // Set flag in negative to indicate cur mtx is MVP
-    vaddc   vPairXYZACopy, vPairXYZA, $v0[0]  // Copy vertex normals
+.if celshading == 0
+    vaddc   vPairAlpha37, vPairRGBA, $v0[0]   // Copy vertex alpha
     suv     ltColor[0], 8(inputVtxPos)        // Store ambient light color to two verts' RGBARGBA
+.endif
     ori     $11, $zero, 0x0004
     vmov    $v30[7], $v30[6]                  // v30[7] = 0x0010 because v30[0:2,4:6] will get clobbered
     mtc2    $11, $v31[6]                      // v31[6] = 0x0004 (was previously 0x0420)
@@ -1966,44 +1997,50 @@ next_light_dirorpoint:
     lbu     $11, (ltBufOfs + 0x3)(curLight)   // Load light type / constant attenuation value at light structure + 3
     bnez    $11, point_lighting_main          // If not zero, use point lighting for the rest of the lights
      lpv    $v2[0], (ltBufOfs + 0x10)(curLight) // Load light transformed direction
+.if celshading == 0
     luv     ltColor[0], 8(inputVtxPos)        // Load current light color of two verts RGBARGBA
+.endif
     vmulu   $v20, vPairNX, $v2[0h]            // Vertex normals X * light transformed dir X
     vmacu   $v20, vPairNY, $v2[1h]            // + Vtx Y * light Y
     vmacu   $v20, vPairNZ, $v2[2h]            // + Vtx Z * light Z; only elements 0, 4 matter
     luv     $v2[0], (ltBufOfs + 0)(curLight)  // Load light RGB
-    vmrg    ltColor, ltColor, vPairXYZACopy   // Select original alpha
+.if celshading == 0
+    vmrg    ltColor, ltColor, vPairAlpha37    // Select original alpha
+.endif
     vand    $v20, $v20, $v31[7]               // 0x7FFF; not sure why AND rather than clamp
+.if celshading == 0
     vmrg    $v2, $v2, $v0[0]                  // Set elements 3 and 7 of light RGB to 0
-.if celshading == 1
-    andi    $11, $10, G_SHADEGTOA             // Is shade green to alpha enabled? (cel shading)
 .endif
     vmulf   ltColor, ltColor, $v31[7]         // Load light color to accumulator (0x7FFF = 0.5 b/c unsigned?)
-.if celshading == 1
-    beqz    $11, light_skipcel_pointdir
-.endif
     vmacf   ltColor, $v2, $v20[0h]            // + light color * dot product
-.if celshading == 1
-    vmrg    ltColor, ltColor, ltColor[1h]     // Set elements 3 and 7 (alpha) to elements 1 and 5 (green)
-light_skipcel_pointdir:
-.endif
+.if celshading == 0
     suv     ltColor[0], 8(inputVtxPos)        // Store new light color of two verts RGBARGBA
+.endif
     bne     curLight, spFxBaseReg, next_light_dirorpoint // If at start of lights, done
      addi   curLight, curLight, -lightSize
 return_from_point_lights:
     lqv     $v31[0], (v31Value)($zero)        // Fix clobbered v31
     lqv     $v30[0], (v30Value)($zero)        // Fix clobbered v30
+.if celshading == 0
     llv     vPairST[4], (inputVtxSize + 0x8)(inputVtxPos) // INSTR 2: load the texture coords of the 2nd vertex into v22[4-7]
+.endif
     bgezal  curMatrix, lights_loadmtxdouble   // Branch if current matrix is MV matrix
      li     curMatrix, mvpMatrix + 0x8000     // Load MVP matrix and set flag for is MVP
+.if celshading == 0
     andi    $11, $5, G_TEXTURE_GEN_H
-    vmrg    $v3, $v0, $v31[5]                 // INSTR 3: Setup for texgen: 0x4000 or zero in pattern 11101110
+    vmrg    $v3, $v0, $v31[5]                 // INSTR 3: Setup for texgen: 0x4000 in elems 3, 7
     beqz    $11, vertices_store               // Done if no texgen
      vge    $v27, $v25, $v31[3]               // INSTR 1: Finishing prev vtx store loop, some sort of clamp Z?
+ .endif
     lpv     $v2[0], (ltBufOfs + 0x10)(curLight) // Load lookat 1 transformed dir for texgen (curLight was decremented)
+.if celshading == 1
+    j       lights_effects
+.endif
     lpv     $v20[0], (ltBufOfs - lightSize + 0x10)(curLight) // Load lookat 0 transformed dir for texgen
-f3dzex_ovl2_00001478:
+.if celshading == 0
     j       lights_texgenmain
      vmulf  $v21, vPairNX, $v2[0h]            // First instruction of texgen, vertex normal X * last transformed dir
+.endif
 
 lights_loadmtxdouble: // curMatrix is either positive mvMatrix or negative mvpMatrix
     /* Load matrix as follows, drawn like math format (translation = col on right):
@@ -2129,7 +2166,11 @@ point_lighting_main:
     vmadh   $v2, mvTc0i, $v20[0h]
     lbu     $24, (ltBufOfs + 0xE)(curLight) // Quadratic attenuation factor byte from point light props
     vmadn   $v2, mvTc1f, $v20[1h]
+.if celshading == 1
+    mtc2    $11, vPairST[0]              // vPairST elems 2, 3, 6, 7 in use, but using here 0, 1, 4, 5
+.else
     mtc2    $11, $v27[0]                 // 0x3 << 4 -> v27 elems 0, 1
+.endif
     vmadh   $v2, mvTc1i, $v20[1h]
     vmadn   $v2, mvTc2f, $v20[2h]
     vmadh   $v20, mvTc2i, $v20[2h]       // v20 = int result of vert-to-light in model space
@@ -2138,7 +2179,11 @@ point_lighting_main:
     vmudn   $v2, $v2, $v31[3]            // this is 0x7F00; v31 is mvTc2f but elements 3 and 7 weren't overwritten
     vmadh   $v20, $v20, $v31[3]          // scale to byte, only keep int part
     vmulu   $v2, vPairNX, $v20[0h]       // Normal X * normalized vert-to-light X
+.if celshading == 1
+    mtc2    $11, vPairST[8]              // vPairST elems 2, 3, 6, 7 in use, but using here 0, 1, 4, 5
+.else
     mtc2    $11, $v27[8]                 // 0x3 << 4 -> v27 elems 4, 5
+.endif
     vmacu   $v2, vPairNY, $v20[1h]       // Y * Y
     lbu     $11, (ltBufOfs + 0x7)(curLight) // Linear attenuation factor byte from point light props
     vmacu   $v2, vPairNZ, $v20[2h]       // Z * Z
@@ -2154,32 +2199,34 @@ point_lighting_main:
     vmudl   $v2, $v2, $v2[0h]            // squared
     vmulf   $v29, $v29, $v20[3]          // Length * byte 0x7
     vmadm   $v29, $v2, $v20[7]           // + (scaled length squared) * byte 0xE << 5
+.if celshading == 1
+    vmadn   $v29, vPairST, $v30[3]       // + (byte 0x3 << 4) * 0xFFF0
+.else
     vmadn   $v29, $v27, $v30[3]          // + (byte 0x3 << 4) * 0xFFF0
+.endif
     vreadacc $v2, ACC_MIDDLE
     vrcph   $v2[0], $v2[0]               // v2 int, v29 frac: function of distance to light
     vrcpl   $v2[0], $v29[0]              // Reciprocal = inversely proportional
     vrcph   $v2[4], $v2[4]
     vrcpl   $v2[4], $v29[4]
+.if celshading == 0
     luv     ltColor[0], 0x0008(inputVtxPos) // Get current RGBARGBA for two verts
+.endif
     vand    $v2, $v2, $v31[7]            // 0x7FFF; not sure why AND rather than clamp
     vmulf   $v2, $v2, $v20               // Inverse dist factor * dot product (elems 0, 4)
     luv     $v20[0], (ltBufOfs + 0)(curLight) // Light color RGB_RGB_
-    vmrg    ltColor, ltColor, vPairXYZACopy // Merge alpha; vPairXYZACopy = v28 = mvTc1f, but A was not overwritten
+.if celshading == 0
+    vmrg    ltColor, ltColor, vPairAlpha37 // Select orig alpha; vPairAlpha37 = v28 = mvTc1f, but alphas were not overwritten
+.endif
     vand    $v2, $v2, $v31[7]            // 0x7FFF; not sure why AND rather than clamp
+.if celshading == 0
     vmrg    $v20, $v20, $v0[0]           // Zero elements 3 and 7 of light color
-.if celshading == 1
-    andi    $11, $10, G_SHADEGTOA        // Is shade green to alpha enabled? (cel shading)
 .endif
     vmulf   ltColor, ltColor, $v31[7]    // Load light color to accumulator (0x7FFF = 0.5 b/c unsigned?)
-.if celshading == 1
-    beqz    $11, light_skipcel_point
-.endif
     vmacf   ltColor, $v20, $v2[0h]       // + light color * dot product
-.if celshading == 1
-    vmrg    ltColor, ltColor, ltColor[1h] // Set elements 3 and 7 (alpha) to elements 1 and 5 (green)
-light_skipcel_point:
-.endif
+.if celshading == 0
     suv     ltColor[0], 0x0008(inputVtxPos) // Store new RGBARGBA for two verts
+.endif
     bne     curLight, spFxBaseReg, next_light_dirorpoint
      addi   curLight, curLight, -lightSize
     j       return_from_point_lights
@@ -2204,7 +2251,7 @@ lights_dircoloraccum2:
     vmacu   $v28, vPairNZ, $v20[2h]      // + vtx n Y only * light dir 2n Y
     addi    curLight, curLight, -(2 * lightSize)
 .if celshading == 0
-    vmrg    ltColor, ltColor, vPairXYZA  // select orig alpha
+    vmrg    ltColor, ltColor, vPairRGBA  // select orig alpha
     mtc2    $zero, $v4[6]                // light 2n+1 color comp 3 = 0 (to not interfere with alpha)
     vmrg    $v3, $v3, $v0[0]             // light 2n color components 3,7 = 0
     mtc2    $zero, $v4[14]               // light 2n+1 color comp 7 = 0 (to not interfere with alpha)
@@ -2218,12 +2265,26 @@ lights_dircoloraccum2:
     bne     $11, spFxBaseReg, lights_dircoloraccum2 // Pointer 1 behind, minus 1 light, if at base then done
      vmacf  ltColor, $v3, $v28[0h]       // + color 2n * dot product
 // End of loop for even number of lights
-    vmrg    $v3, $v0, $v31[5]            // INSTR 3: Setup for texgen: 0x4000 or zero in pattern 11101110
-    
+
 .if celshading == 1
 lights_effects:
+    // What should be set by here:
+    // ltColor, vPairRGBA, v20 = lookat 0, v2 = lookat 1, VCC = 11101110
+    // INSTR 1, INSTR 2, INSTR 3 not done, ltColor not stored
+.endif
+    vmrg    $v3, $v0, $v31[5]            // INSTR 3: Setup for texgen: 0x4000 in elems 3, 7
+    
+.if celshading == 1
+lights_effects_noinstr3: // for v3 already set up
+.if vnormalscolors == 0
+    lhu     $12, geometryModeLabel+2     // Load lower short of geometry mode into $12; can also be used by future mods
+.endif
+    vmrg    ltColor, ltColor, vPairRGBA  // select orig alpha
+.if vnormalscolors == 1
     andi    $11, $10, G_SHADEGTOA        // Is shade green to alpha enabled? (cel shading)
-    vmrg    ltColor, ltColor, vPairXYZA  // select orig alpha
+.else
+    andi    $11, $12, G_SHADEGTOA        // Is shade green to alpha enabled? (cel shading)
+.endif
     beqz    $11, lights_texgenpre
 .endif
     llv     vPairST[4], (inputVtxSize + 8)(inputVtxPos)  // INSTR 2: load the texture coords of the 2nd vertex into v22[4-7]
@@ -2235,23 +2296,23 @@ lights_texgenpre:
 // Texgen beginning
     vge     $v27, $v25, $v31[3]         // INSTR 1: Finishing prev vtx store loop, some sort of clamp Z?
     andi    $11, $5, G_TEXTURE_GEN_H
-    vmulf   $v21, vPairNX, $v2[0h]      // Vertex normal X * lookat 0 dir X
+    vmulf   $v21, vPairNX, $v2[0h]      // Vertex normal X * lookat 1 dir X
     beqz    $11, vertices_store
      suv    ltColor[0], 0x0008(inputVtxPos) // write back color/alpha for two verts
 lights_texgenmain:
 // Texgen main
-    vmacf   $v21, vPairNY, $v2[1h]      // VN Y * lookat 0 dir Y
+    vmacf   $v21, vPairNY, $v2[1h]      // VN Y * lookat 1 dir Y
     andi    $12, $5, G_TEXTURE_GEN_LINEAR_H
-    vmacf   $v21, vPairNZ, $v2[2h]      // VN Z * lookat 0 dir Z
-    vxor    $v4, $v3, $v31[5]           // v4 is now 0x4000 in opposite pattern as v3, 00010001
-    vmulf   $v28, vPairNX, $v20[0h]     // VN XYZ * lookat 1 dir XYZ
+    vmacf   $v21, vPairNZ, $v2[2h]      // VN Z * lookat 1 dir Z
+    vxor    $v4, $v3, $v31[5]           // v4 has 0x4000 in opposite pattern as v3, normally 11101110
+    vmulf   $v28, vPairNX, $v20[0h]     // VN XYZ * lookat 0 dir XYZ
     vmacf   $v28, vPairNY, $v20[1h]     // Y
     vmacf   $v28, vPairNZ, $v20[2h]     // Z
     lqv     $v2[0], (linearGenerateCoefficients)($zero)
     vmudh   vPairST, vOne, $v31[5]      // S, T init to 0x4000 each
-    vmacf   vPairST, $v3, $v21[0h]      // Add dot product with lookat 0 to S (only care about elems 2,3,6,7)
+    vmacf   vPairST, $v3, $v21[0h]      // Add dot product with lookat 1 to T (elems 3, 7)
     beqz    $12, vertices_store
-     vmacf  vPairST, $v4, $v28[0h]      // Add dot product with lookat 1 to T (elems 3, 7)
+     vmacf  vPairST, $v4, $v28[0h]      // Add dot product with lookat 0 to S (elems 2, 6)
 // Texgen Linear--not sure what formula this is implementing
     vmadh   vPairST, vOne, $v2[0]       // ST + Coefficient 0xC000
     vmulf   $v4, vPairST, vPairST       // ST squared
@@ -2268,7 +2329,7 @@ lights_texgenmain:
 
 lights_finishone:
 .if celshading == 0
-    vmrg    ltColor, ltColor, vPairXYZA // select orig alpha
+    vmrg    ltColor, ltColor, vPairRGBA // select orig alpha
     vmrg    $v4, $v4, $v0[0]            // clear alpha component of color
 .endif
     vand    $v21, $v21, $v31[7]         // 0x7FFF; not sure why AND rather than clamp
@@ -2276,14 +2337,14 @@ lights_finishone:
     veq     $v3, $v31, $v31[3h]         // set VCC to 00010001, opposite of 2 light case
 .endif
     lpv     $v2[0], (ltBufOfs - 2 * lightSize + 0x10)(curLight) // Load second dir down, lookat 0, for texgen
-    vmrg    $v3, $v0, $v31[5]           // INSTR 3: Setup for texgen: 0x4000 or zero in OPPOSITE pattern 00010001
+    vmrg    $v3, $v0, $v31[5]           // INSTR 3 OPPOSITE: Setup for texgen: 0x4000 in 0,1,2,4,5,6
 .if celshading == 0
     llv     vPairST[4], (inputVtxSize + 8)(inputVtxPos)  // INSTR 2: load the texture coords of the 2nd vertex into v22[4-7]
 .endif
     vmulf   ltColor, ltColor, $v31[7]   // Move cur color to accumulator
 .if celshading == 1
-    vxor    $v4, $v3, $v31[5]           // Invert v4 (so that VCC is not changed)
-    j       lights_effects
+    vxor    $v3, $v3, $v31[5]           // Invert v3 (so that VCC is not changed)
+    j       lights_effects_noinstr3
 .else
     j       lights_texgenpre
 .endif

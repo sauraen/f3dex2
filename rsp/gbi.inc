@@ -13,7 +13,10 @@ OS_YIELD_DATA_SIZE equ 0xC00
 G_ZBUFFER               equ 0x00000001
 G_TEXTURE_ENABLE        equ 0x00000002
 G_SHADE                 equ 0x00000004
+// Mods
 G_SHADEGTOA             equ 0x00000008 // Shade green -> shade alpha for cel shading
+G_NORMALSCOLORS         equ 0x00000040 // Vertex normals in fourth short of vtx
+G_AMBOCCLUSION          equ 0x00000080 // Multiply ambient light by vtx alpha
 // In this byte, the whole byte is used as an index into a table, so using any
 // other bits will break forwards compatibility. Again, if you only want
 // backwards compatibility, AND 0x06 when this is loaded and then you can use
