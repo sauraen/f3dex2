@@ -1923,12 +1923,7 @@ mvTc2f equ $v31
 light_vtx:
 
 .if vnormalscolors == 1
-    // Temp names
-    vPairNXY equ $v27
-    nMain equ $v7 // also vPairRGBATemp = vPairNX = need X in elems 0, 4
-    nPosXY equ $v6
-    nSqr equ $v6 // nPosXY lifetime ends first
-    
+                            vPairNXY equ $v27
     lhu     $10, geometryModeLabel+2          // Load lower short of geometry mode into $10; used by mods below
     // Undocumented behavior (https://github.com/rasky/r64emu/blob/master/doc/rsp.md):
     // Element in packed instructions works and selects first LANE (not byte), wraps around
@@ -1939,23 +1934,53 @@ light_vtx:
     vmov    vPairNXY[0], $v20[0]              // V0 X in elem 0; g = garbage
     vmov    vPairNXY[1], $v20[1]              // XXXX YYYY gggg gggg XXXX YYYY gggg gggg as signed
     // 3 cycles
+                               nPosXY equ $v6
     vand    nPosXY, vPairNXY, $v31[3]         // 0x7F00; positive X, Y
     // 3 cycles
     vaddc   vPairNZ, nPosXY, nPosXY[1q]       // elem 0, 4: pos X + pos Y, no clamping
     vadd    $v2, vZero, vZero                 // Save carry bit, indicates use 0x7F00 - x and y
+                                nMain equ $v7 // also vPairRGBATemp = vPairNX = need X in elems 0, 4
     vxor    nMain, nPosXY, $v31[3]            // 0x7F00 - +X, 0x7F00 - +Y
     // 1 cycle
     vxor    vPairNZ, vPairNZ, $v31[3]         // Z = 0x7F00 - +X - +Y in elems 0, 4
     vne     $v2, vZero, $v2[0h]               // set 0-3, 4-7 VCC if (pos X + pos Y) negative, discard result
     vmrg    nMain, nMain, nPosXY              // If so, use 0x7F00 - pos X, else pos X (same for Y)
+                                 nSqr equ $v6 // End of nPosXY lifetime
     // 3 cycles
     vmulf   nSqr, nMain, nMain                // X**2, Y**2
+      addiu   $11, $zero, 0xB505              // 1/sqrt(2) as fractional
     vabs    nMain, vPairNXY, nMain            // Apply sign of original X and Y to new X and Y
+                             nRsqrt2 equ $v27 // End of vPairNXY lifetime
     vmulf   $v2, vPairNZ, vPairNZ             // Z**2 in elems 0, 4
-    // 1 cycle
+    mtc2    $11, nRsqrt2[0]
     vmacf   $v2, vOne, nSqr[0h]               // + X**2
     vmacf   nSqr, vOne, nSqr[1h]              // + Y**2
-    
+    // 1 cycle
+    vor     nRsqrt2, vZero, nRsqrt2[0]        // Broadcast to all
+    // 1 cycle
+    vrsqh   $v2[3], nSqr[0]                   // High short input for vert 0, discard output
+    vrsql   $v20[0], vZero[0]                 // Low input 0, low output to v20
+    vrsqh   $v2[0], nSqr[4]                   // High short input for vert 1, high output to v2
+    vrsql   $v20[4], vZero[0]                 // Low input 4, low output to v20
+    vrsqh   $v2[4], vZero[0]                  // High output to v2, don't care input
+    // 2 cycles
+    vmudl   $v20, $v20, nRsqrt2               // Frac * frac 1/sqrt(2) -> Low
+    vmadm   $v2, $v2, nRsqrt2                 // Int * frac 1/sqrt(2) -> Mid
+                                              // End of nRsqrt2 lifetime
+    vmadn   $v27, vZero, vZero[0]             // Get low accmulator
+.if UCODE_HAS_POINT_LIGHTING
+    luv     ltColor[0], (ltBufOfs + lightSize + 0)(curLight) // Load next light color (ambient)
+.else
+    lpv     $v20[0], (ltBufOfs - lightSize + 0x10)(curLight) // Load next below transformed light direction as XYZ_XYZ_ for lights_dircoloraccum2
+.endif
+    // 1 cycle
+    vmudh   nSqr, nMain, $v2                  // Int XY * int normalization -> Mid (discard)
+    vmadm   nMain, nMain, $v27                // Int XY * frac normalization -> Mid
+    vmudh   nSqr, vPairNZ, $v2                // Int Z * int normalization -> Mid (discard)
+    vmadm   vPairNZ, vPairNZ, $v27            // Int Z * frac normalization -> Mid
+    j       after_get_normals
+     vor    vPairNY, vZero, nMain[1h]         // Copy Y to separate vector
+    // 51 cycles total
 
 no_normals_colors:
 .endif
@@ -1966,6 +1991,9 @@ no_normals_colors:
     lpv     $v20[0], (ltBufOfs - lightSize + 0x10)(curLight) // Load next below transformed light direction as XYZ_XYZ_ for lights_dircoloraccum2
 .endif
     vadd    vPairNZ, vZero, vPairRGBATemp[2h] // Move vertex normals Z to separate reg
+.if vnormalscolors == 1
+after_get_normals:
+.endif
     luv     vPairRGBA[0], 8(inputVtxPos)      // Load both verts' XYZAXYZA as unsigned
     vne     $v4, $v31, $v31[3h]               // Set VCC to 11101110
 .if UCODE_HAS_POINT_LIGHTING
