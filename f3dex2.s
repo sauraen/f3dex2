@@ -1937,31 +1937,31 @@ light_vtx:
     nSqr equ $v6 // nPosXY lifetime ends first
     
     lhu     $10, geometryModeLabel+2          // Load lower short of geometry mode into $10; used by mods below
-    lpv     $v20, 0(inputVtxPos)              // Vert 0 packed normals in elems 6-7
-    lpv     vPairNXY, (inputVtxSize)(inputVtxPos) // Vert 1 packed normals in elems 6-7
+    // Undocumented behavior (https://github.com/rasky/r64emu/blob/master/doc/rsp.md):
+    // Element in packed instructions works and selects first LANE (not byte), wraps around
+    lpv     $v20[2], 0(inputVtxPos)           // Vert 0 packed normals in elems 0-1
+    lpv     vPairNXY[6], (inputVtxSize)(inputVtxPos) // Vert 1 packed normals in elems 4-5
     andi    $11, $10, G_NORMALSCOLORS         // Normals in fourth short of vtx
     beqz    $11, no_normals_colors
-    vmov    vPairNXY[2], $v20[6]              // V0 X in elem 3; g = garbage
-    vmov    vPairNXY[3], $v20[7]              // gggg gggg XXXX YYYY gggg gggg XXXX YYYY as signed
+    vmov    vPairNXY[0], $v20[0]              // V0 X in elem 0; g = garbage
+    vmov    vPairNXY[1], $v20[1]              // XXXX YYYY gggg gggg XXXX YYYY gggg gggg as signed
     // 3 cycles
     vand    nPosXY, vPairNXY, $v31[3]         // 0x7F00; positive X, Y
     // 3 cycles
-    vaddc   $v20, nPosXY, nPosXY[1q]          // elem 2, 6: pos X + pos Y, no clamping
+    vaddc   vPairNZ, nPosXY, nPosXY[1q]       // elem 0, 4: pos X + pos Y, no clamping
     vadd    $v2, $v0, $v0                     // Save carry bit, indicates use 0x7F00 - x and y
     vxor    nMain, nPosXY, $v31[3]            // 0x7F00 - +X, 0x7F00 - +Y
-    // 2 cycles
-    vne     $v2, $v0, $v2[2h]                 // set 0-3, 4-7 VCC if (pos X + pos Y) negative, discard result
-    vxor    $v20, $v20, $v31[3]               // Z = 0x7F00 - +X - +Y in elems 2, 6
+    // 1 cycle
+    vxor    vPairNZ, vPairNZ, $v31[3]         // Z = 0x7F00 - +X - +Y in elems 0, 4
+    vne     $v2, $v0, $v2[0h]                 // set 0-3, 4-7 VCC if (pos X + pos Y) negative, discard result
     vmrg    nMain, nMain, nPosXY              // If so, use 0x7F00 - pos X, else pos X (same for Y)
-    // 2 cycles
-    vor     vPairNZ, $v0, $v20[2h]            // Copy Z to 0-3, 4-7 (need it in 0, 4)
+    // 3 cycles
     vmulf   nSqr, nMain, nMain                // X**2, Y**2
     vabs    nMain, vPairNXY, nMain            // Apply sign of original X and Y to new X and Y
-    vmulf   $v2, $v20, $v20                   // Z**2 in elems 2, 6
-    vne     $v2, $v31, $v31[0h]               // Set VCC to 01110111
-    vmacf   $v2, vOne, nSqr[2h]               // + X**2
-    vmacf   nSqr, vOne, nSqr[3h]              // + Y**2
-    vmrg    nMain, nMain, nMain[2h]           // Move X to elems 0, 4
+    vmulf   $v2, vPairNZ, vPairNZ             // Z**2 in elems 0, 4
+    // 1 cycle
+    vmacf   $v2, vOne, nSqr[0h]               // + X**2
+    vmacf   nSqr, vOne, nSqr[1h]              // + Y**2
     
 
 no_normals_colors:
