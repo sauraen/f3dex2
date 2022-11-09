@@ -1923,7 +1923,7 @@ mvTc2f equ $v31
 light_vtx:
 
 .if vnormalscolors == 1
-                            vPairNXY equ $v27
+                            vPairNXY equ $v27 // going to be vPairRGBA
     lhu     $10, geometryModeLabel+2          // Load lower short of geometry mode into $10; used by mods below
     // Undocumented behavior (https://github.com/rasky/r64emu/blob/master/doc/rsp.md):
     // Element in packed instructions works and selects first LANE (not byte), wraps around
@@ -1934,12 +1934,12 @@ light_vtx:
     vmov    vPairNXY[0], $v20[0]              // V0 X in elem 0; g = garbage
     vmov    vPairNXY[1], $v20[1]              // XXXX YYYY gggg gggg XXXX YYYY gggg gggg as signed
     // 3 cycles
-                               nPosXY equ $v6
+                               nPosXY equ $v6 // going to be vPairNY = need Y in elems 0, 4
     vand    nPosXY, vPairNXY, $v31[3]         // 0x7F00; positive X, Y
     // 3 cycles
     vaddc   vPairNZ, nPosXY, nPosXY[1q]       // elem 0, 4: pos X + pos Y, no clamping
     vadd    $v2, vZero, vZero                 // Save carry bit, indicates use 0x7F00 - x and y
-                                nMain equ $v7 // also vPairRGBATemp = vPairNX = need X in elems 0, 4
+                                nMain equ $v7 // going to be vPairNX = need X in elems 0, 4
     vxor    nMain, nPosXY, $v31[3]            // 0x7F00 - +X, 0x7F00 - +Y
     // 1 cycle
     vxor    vPairNZ, vPairNZ, $v31[3]         // Z = 0x7F00 - +X - +Y in elems 0, 4
