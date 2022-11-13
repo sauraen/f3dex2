@@ -1942,46 +1942,42 @@ light_vtx:
                                 nMain equ $v7 // going to be vPairNX = need X in elems 0, 4
     vxor    nMain, nPosXY, $v31[3]            // 0x7F00 - +X, 0x7F00 - +Y
     // 1 cycle
-    vxor    vPairNZ, vPairNZ, $v31[3]         // Z = 0x7F00 - +X - +Y in elems 0, 4
+    vxor    $v20, vPairNZ, $v31[3]            // Z = 0x7F00 - +X - +Y in elems 0, 4
     vne     $v2, vZero, $v2[0h]               // set 0-3, 4-7 VCC if (pos X + pos Y) negative, discard result
     vmrg    nMain, nMain, nPosXY              // If so, use 0x7F00 - pos X, else pos X (same for Y)
                                  nSqr equ $v6 // End of nPosXY lifetime
-    // 3 cycles
-    vmulf   nSqr, nMain, nMain                // X**2, Y**2
-      addiu   $11, $zero, 0xB505              // 1/sqrt(2) as fractional
+    // 1 cycle
+    vmulf   vPairNZ, $v20, $v31[5]            // new Z = (Z * 0x4000) << 1 (divide by 2)
+    vmudh   nSqr, $v20, $v20                  // Z^2, up to 0x3F01, in accum upper elems 0, 4
+    // 1 cycle
+    vor     $v20, vZero, nMain[1h]            // Y to elems 0, 4
+    vmadh   nSqr, nMain, nMain                // accum upper elems 0, 4 += X^2
     vabs    nMain, vPairNXY, nMain            // Apply sign of original X and Y to new X and Y
-                             nRsqrt2 equ $v27 // End of vPairNXY lifetime
-    vmulf   $v2, vPairNZ, vPairNZ             // Z**2 in elems 0, 4
-    mtc2    $11, nRsqrt2[0]
-    vmacf   $v2, vOne, nSqr[0h]               // + X**2
-    vmacf   nSqr, vOne, nSqr[1h]              // + Y**2
+                                              // End of vPairNXY lifetime
     // 1 cycle
-    vor     nRsqrt2, vZero, nRsqrt2[0]        // Broadcast to all
-    // 1 cycle
-    vrsqh   $v2[3], nSqr[0]                   // High short input for vert 0, discard output
-    vrsql   $v20[0], vZero[0]                 // Low input 0, low output to v20
-    vrsqh   $v2[0], nSqr[4]                   // High short input for vert 1, high output to v2
-    vrsql   $v20[4], vZero[0]                 // Low input 4, low output to v20
-    vrsqh   $v2[4], vZero[0]                  // High output to v2, don't care input
+    vmadh   nSqr, $v20, $v20                  // accum upper elems 0, 4 += Y^2
+    vsar    nSqr, vZero, vZero[ACC_UPPER]     // read sum of squares from accum hi
+    vmulf   nMain, nMain, $v31[5]             // new X, Y = (X, Y * 0x4000) << 1 (divide by 2)
     // 2 cycles
-    vmudl   $v20, $v20, nRsqrt2               // Frac * frac 1/sqrt(2) -> Low
-    vmadm   $v2, $v2, nRsqrt2                 // Int * frac 1/sqrt(2) -> Mid
-                                              // End of nRsqrt2 lifetime
-    vmadn   $v27, vZero, vZero[0]             // Get low accmulator
-.if UCODE_HAS_POINT_LIGHTING
-    luv     ltColor[0], (ltBufOfs + lightSize + 0)(curLight) // Load next light color (ambient)
-.else
-    lpv     $v20[0], (ltBufOfs - lightSize + 0x10)(curLight) // Load next below transformed light direction as XYZ_XYZ_ for lights_dircoloraccum2
-.endif
-    // 1 cycle
+    vrsqh   $v2[3], nSqr[0]                   // High short input for vert 0, discard output
+    vrsql   $v27[0], vZero[0]                 // Low input 0, low output to v27
+    vrsqh   $v2[0], nSqr[4]                   // High short input for vert 1, high output to v2
+    vrsql   $v27[4], vZero[0]                 // Low input 4, low output to v27
+    vrsqh   $v2[4], vZero[0]                  // High output to v2, don't care input
+    .if UCODE_HAS_POINT_LIGHTING
+        luv     ltColor[0], (ltBufOfs + lightSize + 0)(curLight) // Load next light color (ambient)
+    .else
+        lpv     $v20[0], (ltBufOfs - lightSize + 0x10)(curLight) // Load next below transformed light direction as XYZ_XYZ_ for lights_dircoloraccum2
+    .endif
+    // 3 cycles
     vmudh   nSqr, nMain, $v2                  // Int XY * int normalization -> Mid (discard)
     vmadm   nMain, nMain, $v27                // Int XY * frac normalization -> Mid
     vmudh   nSqr, vPairNZ, $v2                // Int Z * int normalization -> Mid (discard)
     vmadm   vPairNZ, vPairNZ, $v27            // Int Z * frac normalization -> Mid
     j       after_get_normals
      vor    vPairNY, vZero, nMain[1h]         // Copy Y to separate vector
-    // 51 cycles total
-
+    // 48 cycles total
+    
 no_normals_colors:
 .endif
     vadd    vPairNY, vZero, vPairRGBATemp[1h]   // Move vertex normals Y to separate reg
