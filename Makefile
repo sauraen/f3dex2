@@ -17,29 +17,37 @@ NoN ?= 1
 #  2.06H (Ocarina of Time)
 VERSION ?= 2.08J
 
-# Set to 1 to enable cel shading, algorithm by Sauraen and glank.
-CELSHADING ?= 1
+# Set to 1 to enable lighting mods.
+LTMOD ?= 0
 
 ARMIPS ?= armips
 
 OUTPUT_DIR ?= ./
 
-# List of all microcodes buildable with this codebase.
+# List of all microcodes buildable with this codebase
 # If your desired configuration is not in the list below, add it here, though
 # you won't get MD5sum checking.
-UCODES := F3DEX2_2.08 F3DEX2_2.07 F3DEX2_2.04H F3DEX2_2.08PL \
-          F3DEX2_NoN_2.08 F3DEX2_NoN_2.07 F3DEX2_NoN_2.04H F3DEX2_NoN_2.08PL \
-          F3DZEX_2.08J F3DZEX_2.08I F3DZEX_2.06H \
-          F3DZEX_NoN_2.08J F3DZEX_NoN_2.08I F3DZEX_NoN_2.06H \
-          F3DZEX_NoN_cel_2.06H F3DZEX_NoN_cel_2.08J
+UCODES := F3DEX2_2.08   F3DEX2_NoN_2.08   F3DEX2_2.08_XBUS  \
+		  F3DEX2_2.08PL F3DEX2_NoN_2.08PL \
+		  F3DEX2_2.07   F3DEX2_NoN_2.07   F3DEX2_2.07_XBUS  \
+		  F3DEX2_2.04H  F3DEX2_NoN_2.04H \
+          F3DZEX_2.08J  F3DZEX_NoN_2.08J \
+		  F3DZEX_2.08I  F3DZEX_NoN_2.08I \
+		  F3DZEX_2.06H  F3DZEX_NoN_2.06H \
+		  F3DZEX_NoN_ltmod_2.06H \
+		  F3DZEX_NoN_ltmod_2.08J
 
 # F3DEX2
 MD5_CODE_F3DEX2_2.08      := 6ccf5fc392e440fb23bc7d7f7d71047c
 MD5_DATA_F3DEX2_2.08      := 3a3a406acb4295d33fa6e918dd3a7ae4
+MD5_CODE_F3DEX2_2.08_XBUS := 38cbd8ef2cd168141347047cf7ec4fba
+MD5_DATA_F3DEX2_2.08_XBUS := dcb9a145381557d146683ddb853c6cfd
 MD5_CODE_F3DEX2_2.08PL    := 6a5117e62e51d87020fb81dc493efcb6
 MD5_DATA_F3DEX2_2.08PL    := 1a6b826322aab9c93da61356af5ead40
 MD5_CODE_F3DEX2_2.07      := 1523b8e38a9eae698b48909a0c0c0279
 MD5_DATA_F3DEX2_2.07      := 25be72ec04e2e6a23dfa7666645f0662
+MD5_CODE_F3DEX2_2.07_XBUS := b882f402e115ffaf05a9ee44f354c441
+MD5_DATA_F3DEX2_2.07_XBUS := 71436bdc62d9263d5c2fefa783cffd4f
 MD5_CODE_F3DEX2_NoN_2.08  := b5c366b55a032f232aa309cda21be3d7
 MD5_DATA_F3DEX2_NoN_2.08  := 2c8dedc1b1e2fe6405c9895c4290cf2b
 MD5_CODE_F3DEX2_2.04H     := d3a58568fa7cf042de370912a47c3b5f
@@ -51,16 +59,13 @@ MD5_CODE_F3DZEX_NoN_2.08I := ca0a31df36dbeda69f09e9850e68c7f7
 MD5_DATA_F3DZEX_NoN_2.08I := d31cea0e173c6a4a09e4dfe8f259c91b
 MD5_CODE_F3DZEX_NoN_2.06H := 96a1a7a8eab45e0882aab9e4d8ccbcc3
 MD5_DATA_F3DZEX_NoN_2.06H := e48c7679f1224b7c0947dcd5a4d0c713
-# Cel shading microcodes
-# MD5_CODE_F3DZEX_NoN_cel_2.06H := 00000000000000000000000000000000
-# MD5_DATA_F3DZEX_NoN_cel_2.06H := $(MD5_DATA_F3DZEX_NoN_2.06H)
-# MD5_CODE_F3DZEX_NoN_cel_2.08J := 00000000000000000000000000000000
-# MD5_DATA_F3DZEX_NoN_cel_2.08J := $(MD5_DATA_F3DZEX_NoN_2.08J)
 
 # Microcode strings
 # F3DEX2
 NAME_F3DEX2_2.08       := RSP Gfx ucode F3DEX       fifo 2.08  Yoshitaka Yasumoto 1999 Nintendo.
+NAME_F3DEX2_2.08_XBUS  := RSP Gfx ucode F3DEX       xbus 2.08  Yoshitaka Yasumoto 1999 Nintendo.
 NAME_F3DEX2_2.07       := RSP Gfx ucode F3DEX       fifo 2.07  Yoshitaka Yasumoto 1998 Nintendo.
+NAME_F3DEX2_2.07_XBUS  := RSP Gfx ucode F3DEX       xbus 2.07  Yoshitaka Yasumoto 1998 Nintendo.
 NAME_F3DEX2_2.04H      := RSP Gfx ucode F3DEX       fifo 2.04H Yoshitaka Yasumoto 1998 Nintendo.
 NAME_F3DEX2_2.08PL     := RSP Gfx ucode F3DEX       fifo 2.08  Yoshitaka Yasumoto/Kawasedo 1999.
 NAME_F3DEX2_NoN_2.08   := RSP Gfx ucode F3DEX.NoN   fifo 2.08  Yoshitaka Yasumoto 1999 Nintendo.
@@ -76,9 +81,9 @@ NAME_F3DZEX_2.06H      := RSP Gfx ucode F3DZEX.NoN  fifo 2.06H Yoshitaka Yasumot
 NAME_F3DZEX_NoN_2.08J  := RSP Gfx ucode F3DZEX.NoN  fifo 2.08J Yoshitaka Yasumoto/Kawasedo 1999.
 NAME_F3DZEX_NoN_2.08I  := RSP Gfx ucode F3DZEX.NoN  fifo 2.08I Yoshitaka Yasumoto/Kawasedo 1999.
 NAME_F3DZEX_NoN_2.06H  := RSP Gfx ucode F3DZEX.NoN  fifo 2.06H Yoshitaka Yasumoto 1998 Nintendo.
-# Cel shading microcodes
-NAME_F3DZEX_NoN_cel_2.06H := $(NAME_F3DZEX_NoN_2.06H)
-NAME_F3DZEX_NoN_cel_2.08J := $(NAME_F3DZEX_NoN_2.08J)
+# Modded microcodes
+NAME_F3DZEX_NoN_ltmod_2.06H := $(NAME_F3DZEX_NoN_2.06H)
+NAME_F3DZEX_NoN_ltmod_2.08J := $(NAME_F3DZEX_NoN_2.08J)
 
 ID_F3DEX2_2.04H  := 0
 ID_F3DEX2_2.07   := 1
@@ -91,6 +96,10 @@ ID_F3DZEX_2.08J := 2
 
 TYPE_F3DEX2 := 0
 TYPE_F3DZEX := 1
+
+# FIFO is the preferred method
+METHOD_FIFO := 0
+METHOD_XBUS := 1
 
 NO_COL := \033[0m
 BOLD   := # \033[1m
@@ -108,9 +117,9 @@ WARNING := $(YELLOW)
 define set_vars
   FULL_UCODE := $(1)
   # These need to be eval'd to use their values in this same function
-  CUR_UCODE_NO_SUFFIX := $$(subst _cel,,$(subst _NoN,,$(1)))
-  CUR_VERSION := $$(subst F3DZEX_,,$$(subst F3DEX2_,,$$(CUR_UCODE_NO_SUFFIX)))
-  CUR_UCODE := $$(patsubst %_$$(CUR_VERSION),%,$$(CUR_UCODE_NO_SUFFIX))
+  CUR_UCODE_WITHOUT_SUFFIX := $(subst _ltmod,,$(subst _XBUS,,$(subst _NoN,,$(1))))
+  CUR_VERSION := $$(subst F3DZEX_,,$$(subst F3DEX2_,,$$(CUR_UCODE_WITHOUT_SUFFIX)))
+  CUR_UCODE := $$(patsubst %_$$(CUR_VERSION),%,$$(CUR_UCODE_WITHOUT_SUFFIX))
   FULL_OUTPUT_DIR := $$(OUTPUT_DIR)/$(1)
 ifeq ($(OS),Windows_NT)
   FULL_OUTPUT_DIR := $$(subst /,\,$$(FULL_OUTPUT_DIR))
@@ -125,14 +134,21 @@ endif
   else
     CUR_NoN := 1
   endif
-  ifeq ($(findstring _cel,$(1)),)
-    CUR_celshading := 0
+  
+  ifeq ($(findstring _ltmod,$(1)),)
+    CUR_ltmod := 0
   else
-    CUR_celshading := 1
+    CUR_ltmod := 1
+  endif
+
+  ifneq ($(findstring _XBUS,$(1)),)
+    METHOD := $(METHOD_XBUS)
+  else
+    METHOD := $(METHOD_FIFO)
   endif
 
   NAME := $(NAME_$(1))
-  ID := $$(ID_$$(CUR_UCODE_NO_SUFFIX))
+  ID := $$(ID_$$(CUR_UCODE_WITHOUT_SUFFIX))
   TYPE := $$(TYPE_$$(CUR_UCODE))
   CODE_MD5 := $$(MD5_CODE_$(1))
   DATA_MD5 := $$(MD5_DATA_$(1))
@@ -144,7 +160,7 @@ define ucode_rule
 
   $(CODE_FILE) $(DATA_FILE) $(SYM_FILE) $(SYM2_FILE) $(TEMP_FILE): ./f3dex2.s ./rsp/* $(FULL_OUTPUT_DIR)
 	@printf "$(INFO)Building microcode: $(FULL_UCODE)$(NO_COL)\n"
-	$(ARMIPS) -strequ DATA_FILE $(DATA_FILE) -strequ CODE_FILE $(CODE_FILE) -strequ NAME "$(NAME)" -equ UCODE_TYPE $(TYPE) -equ UCODE_ID $(ID) -equ NoN $(CUR_NoN) -equ celshading $(CUR_celshading) f3dex2.s -sym2 $(SYM_FILE) -temp $(TEMP_FILE)
+	@$(ARMIPS) -strequ DATA_FILE $(DATA_FILE) -strequ CODE_FILE $(CODE_FILE) -strequ NAME "$(NAME)" -equ UCODE_TYPE $(TYPE) -equ UCODE_METHOD $(METHOD) -equ UCODE_ID $(ID) -equ NoN $(CUR_NoN) -equ ltmod $(CUR_ltmod) f3dex2.s -sym2 $(SYM_FILE) -temp $(TEMP_FILE)
   ifeq ($(CODE_MD5),)
 	@printf "  $(WARNING)Nothing to compare $(1) to!$(NO_COL)\n"
   else
@@ -169,8 +185,8 @@ SUFFIX :=
 ifeq ($(NoN),1)
   SUFFIX :=_NoN
 endif
-ifeq ($(CELSHADING),1)
-  SUFFIX :=$(SUFFIX)_cel
+ifeq ($(LTMOD),1)
+  SUFFIX :=$(SUFFIX)_ltmod
 endif
 INPUT_UCODE := $(UCODE)$(SUFFIX)_$(VERSION)
 FULL_OUTPUT_DIR := $(OUTPUT_DIR)/$(INPUT_UCODE)
@@ -180,6 +196,7 @@ endif
 CODE_FILE := $(FULL_OUTPUT_DIR)/$(INPUT_UCODE).code
 DATA_FILE := $(FULL_OUTPUT_DIR)/$(INPUT_UCODE).data
 $(warning CODE_FILE $(CODE_FILE) DATA_FILE $(DATA_FILE))
+
 
 default: $(CODE_FILE) $(DATA_FILE)
 
