@@ -1,8 +1,12 @@
 # Selects the microcode to assemble. Options are F3DEX2 and F3DZEX
-UCODE ?= F3DEX2
+UCODE ?= F3DZEX
 
 # Set to 1 to enable NoN(No Nearclipping). Note that no official F3DZEX exists without NoN.
-NoN ?= 0
+NoN ?= 1
+
+# Set to 1 to place the lighting and clipping code (normally overlays 2 and 3)
+# in IMEM at all times, instead of swapping between them.
+NOOVL23 ?= 1
 
 # Selects which version of a given microcode to build:
 # F3DEX2:
@@ -17,7 +21,7 @@ NoN ?= 0
 #  2.08J (Animal Forest) (Recommended over 2.08I due to a change properly zeroes out $v0)
 #  2.08I (Majora's Mask)
 #  2.06H (Ocarina of Time)
-VERSION ?= 2.08
+VERSION ?= 2.08J
 
 ARMIPS ?= armips
 
@@ -143,7 +147,7 @@ define ucode_rule
 
   $(CODE_FILE) $(DATA_FILE) $(SYM_FILE) $(SYM2_FILE) $(TEMP_FILE): ./f3dex2.s ./rsp/* $(FULL_OUTPUT_DIR)
 	@printf "$(INFO)Building microcode: $(FULL_UCODE)$(NO_COL)\n"
-	@$(ARMIPS) -strequ DATA_FILE $(DATA_FILE) -strequ CODE_FILE $(CODE_FILE) -strequ NAME "$(NAME)" -equ UCODE_TYPE $(TYPE) -equ UCODE_METHOD $(METHOD) -equ UCODE_ID $(ID) -equ NoN $(CUR_NoN) f3dex2.s -sym2 $(SYM_FILE) -temp $(TEMP_FILE)
+	@$(ARMIPS) -strequ DATA_FILE $(DATA_FILE) -strequ CODE_FILE $(CODE_FILE) -strequ NAME "$(NAME)" -equ UCODE_TYPE $(TYPE) -equ UCODE_METHOD $(METHOD) -equ UCODE_ID $(ID) -equ NoN $(CUR_NoN) -equ NOOVL23 $(NOOVL23) f3dex2.s -sym2 $(SYM_FILE) -temp $(TEMP_FILE)
   ifeq ($(CODE_MD5),)
 	@printf "  $(WARNING)Nothing to compare $(1) to!$(NO_COL)\n"
   else

@@ -498,11 +498,15 @@ lbl_03F8:
 .dw 0x00000040 // Nearclipping
 .endif
 
+.if !NOOVL23
 // 0x0410-0x0420: Overlay 2/3 table
 overlayInfo2:
     OverlayEntry orga(ovl2_start), orga(ovl2_end), ovl2_start
 overlayInfo3:
     OverlayEntry orga(ovl3_start), orga(ovl3_end), ovl3_start
+.else
+    .skip 0x10 // Until we're sure that DMEM is fully relocatable
+.endif
 
 // 0x0420-0x0920: Vertex buffer
 vertexBuffer:
@@ -553,7 +557,7 @@ OSTask:
 .close // DATA_FILE
 
 // RSP IMEM
-.create CODE_FILE, 0x00001080
+.create CODE_FILE, 0x00001080 // Initial file addr = IMEM addr 0x1080
 
 // Global registers
 cmd_w1 equ $24
@@ -565,7 +569,7 @@ rdpCmdBufEnd equ $22
 
 // Initialization routines
 // Everything up until displaylist_dma will get overwritten by ovl0 and/or ovl1
-start:
+start: // starts at IMEM 0x1080, not 0x1000
 .if UCODE_TYPE == TYPE_F3DZEX && UCODE_ID < 2
     vor     vZero, $v16, $v16 // Sets vZero to $v16
 .else
@@ -646,26 +650,39 @@ calculate_overlay_addrs:
     lw      $1, OSTask + OSTask_ucode
     lw      $2, overlayInfo0 + overlay_load
     lw      $3, overlayInfo1 + overlay_load
+.if !NOOVL23
     lw      $4, overlayInfo2 + overlay_load
     lw      $5, overlayInfo3 + overlay_load
+.endif
     add     $2, $2, $1
     add     $3, $3, $1
     sw      $2, overlayInfo0 + overlay_load
     sw      $3, overlayInfo1 + overlay_load
+.if !NOOVL23
     add     $4, $4, $1
     add     $5, $5, $1
     sw      $4, overlayInfo2 + overlay_load
     sw      $5, overlayInfo3 + overlay_load
+.endif
     lw      taskDataPtr, OSTask + OSTask_data_ptr
 load_overlay1_init:
     li      $11, overlayInfo1   // set up loading of overlay 1
 
+.if !NOOVL23
 .align 8
+.endif
 
     jal     load_overlay_and_enter  // load overlay 1 and enter
      move   $12, $ra                // set up the return address, since load_overlay_and_enter returns to $12
     // This return should be such that it coincides with displaylist_dma so no code from overlay 1 is ran, ensure that
     // ovl01_end remains aligned to 8 bytes
+
+.if NOOVL23
+.align 8
+// Start of IMEM, 0x1000, is 0x80 before the start of the file
+.orga max(orga(), max(ovl0_end - ovl0_start, ovl1_end - ovl1_start) - 0x80)
+.endif
+
 ovl01_end:
 // Overlays 0 and 1 overwrite everything up to this point (2.08 versions overwrite up to the previous .align 8)
 
@@ -841,10 +858,12 @@ ovl0_0400129C:
      nop
 .endif
 
+.if !NOOVL23
 .align 8
 ovl23_start:
 
 ovl3_start:
+.endif
 
 // Overlay 3 registers
 savedRA equ $30
@@ -855,12 +874,14 @@ vPairMVPPosF equ $v23
 vPairST equ $v22
 vPairRGBATemp equ $v7
 
+.if !NOOVL23
 // Jump here to do lighting. If overlay 3 is loaded (this code), loads and jumps
 // to overlay 2 (same address as right here).
-ovl23_lighting_entrypoint:
+ovl23_lighting_entrypoint_copy:     // same IMEM address as ovl23_lighting_entrypoint
     li      $11, overlayInfo2       // set up a load for overlay 2
     j       load_overlay_and_enter  // load overlay 2
      li     $12, ovl23_lighting_entrypoint  // set the return address
+.endif
 
 // Jump here to do clipping. If overlay 3 is loaded (this code), directly starts
 // the clipping code.
@@ -1031,6 +1052,7 @@ f3dzex_000014EC:
     jr      savedRA
      sw     savedNearclip, nearclipValue
 
+.if !NOOVL23
 .align 8
 
 // Leave room for loading overlay 2 if it is larger than overlay 3 (true for f3dzex)
@@ -1038,6 +1060,10 @@ f3dzex_000014EC:
 ovl3_end:
 
 ovl23_end:
+.else
+put_lighting_here:
+.orga ovl2_end - ovl2_start + orga()   // Make space for lighting contents
+.endif
 
 inputVtxPos equ $14
 tempCmdBuf50 equ $8
@@ -1791,7 +1817,7 @@ ovl0_xbus_wait_for_rdp_2:
 ovl0_end:
 
 .if ovl0_end > ovl01_end
-    .error "Overlay 0 too large"
+    .error "Error with address setup for overlay 0"
 .endif
 
 // overlay 1 (0x170 bytes loaded into 0x1000)
@@ -1936,22 +1962,32 @@ G_SETOTHERMODE_L_handler:
 ovl1_end:
 
 .if ovl1_end > ovl01_end
-    .error "Overlay 1 too large"
+    .error "Error with address setup for overlay 1"
 .endif
 
+.if !NOOVL23
 .headersize ovl23_start - orga()
+.else
+.orga orga(put_lighting_here)
+.headersize put_lighting_here - orga()
+.endif
 
 ovl2_start:
-ovl23_lighting_entrypoint_copy:         // same IMEM address as ovl23_lighting_entrypoint
+
+ovl23_lighting_entrypoint:
     lbu     $11, lightsValid
+.if !NOOVL23
     j       continue_light_dir_xfrm
+.endif
      lbu    tmpCurLight, numLightsx18
 
+.if !NOOVL23
 ovl23_clipping_entrypoint_copy:         // same IMEM address as ovl23_clipping_entrypoint
     move    savedRA, $ra
     li      $11, overlayInfo3           // set up a load of overlay 3
     j       load_overlay_and_enter      // load overlay 3
      li     $12, ovl3_clipping_nosavera // set up the return address in ovl3
+.endif
      
 continue_light_dir_xfrm:
     // Transform light directions from camera space to model space, by
@@ -2360,7 +2396,9 @@ lights_finishone:
     j       lights_texgenpre
      vmacf  ltColor, $v4, $v21[0h]      // + light color * dot product
 
+.if !NOOVL23
 .align 8
+.endif
 ovl2_end:
 
 .close // CODE_FILE
