@@ -537,8 +537,7 @@ tempMatrix:
 // 0x0A50-0x0BA8: Remainder of clipTempVerts
     .skip clipTempVertsSize - (. - clipTempVerts)
 
-RDP_CMD_BUFSIZE equ 0x158
-//RDP_CMD_BUFSIZE equ ((0xFC0 - . - 0xB0 - 0xB0) / 2)
+RDP_CMD_BUFSIZE equ ((((0xFC0 - . - 0xB0 - 0xB0) / 2) >> 3) << 3)
 RDP_CMD_BUFSIZE_EXCESS equ 0xB0 // Maximum size of an RDP triangle command
 RDP_CMD_BUFSIZE_TOTAL equ RDP_CMD_BUFSIZE + RDP_CMD_BUFSIZE_EXCESS
 // 0x0BA8-0x0D00: First RDP Command Buffer
@@ -553,9 +552,6 @@ rdpCmdBuffer2:
     .skip RDP_CMD_BUFSIZE
 rdpCmdBuffer2End:
     .skip RDP_CMD_BUFSIZE_EXCESS
-    
-// ??
-.skip 0x158
 
 .if . > 0x00000FC0
     .error "Not enough room in DMEM"
