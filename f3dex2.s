@@ -514,11 +514,9 @@ overlayInfo3:
 vertexBuffer:
     .skip (vtxSize * 32) // 32 vertices
 
-.skip 0x10
-
 // 0x0920-0x09C8: Input buffer
 inputBuffer:
-inputBufferLength equ 0xA8
+inputBufferLength equ 0xA0 //0xA8
     .skip inputBufferLength
 inputBufferEnd:
 
