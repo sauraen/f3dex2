@@ -526,7 +526,7 @@ clipTempVertsCount equ 12 // Up to 2 temp verts can be created for each of the 6
 clipTempVertsSize equ clipTempVertsCount * vtxSize
 
 // 0x09C8-0x09D0
-    .skip 0x8 // should be .align 0x10, but this makes armips continue the output file to here
+//    .skip 0x8 // should be .align 0x10, but this makes armips continue the output file to here
 
 // 0x09D0-0x0A10: Temp matrix for G_MTX multiplication mode, overlaps with clipTempVerts
 tempMatrix:
