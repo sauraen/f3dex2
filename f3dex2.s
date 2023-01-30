@@ -508,13 +508,13 @@ overlayInfo2:
     OverlayEntry orga(ovl2_start), orga(ovl2_end), ovl2_start
 overlayInfo3:
     OverlayEntry orga(ovl3_start), orga(ovl3_end), ovl3_start
-.else
-    .skip 0x10 // Until we're sure that DMEM is fully relocatable
 .endif
 
 // 0x0420-0x0920: Vertex buffer in RSP internal format
 vertexBuffer:
     .skip (vtxSize * 32) // 32 vertices
+
+.skip 0x10
 
 // 0x0920-0x09C8: Input buffer
 inputBuffer:
@@ -537,21 +537,19 @@ tempMatrix:
 // 0x0A50-0x0BA8: Remainder of clipTempVerts
     .skip clipTempVertsSize - (. - clipTempVerts)
 
-RDP_CMD_BUFSIZE equ ((((0xFC0 - . - 0xB0 - 0xB0) / 2) >> 3) << 3)
-RDP_CMD_BUFSIZE_EXCESS equ 0xB0 // Maximum size of an RDP triangle command
-RDP_CMD_BUFSIZE_TOTAL equ RDP_CMD_BUFSIZE + RDP_CMD_BUFSIZE_EXCESS
 // 0x0BA8-0x0D00: First RDP Command Buffer
 rdpCmdBuffer1:
+RDP_CMD_BUFSIZE equ ((((0xFC0 - rdpCmdBuffer1 - 2 * maxRDPTriCmdSize) / 2) >> 3) << 3)
     .skip RDP_CMD_BUFSIZE
 rdpCmdBuffer1End:
-    .skip RDP_CMD_BUFSIZE_EXCESS
+    .skip maxRDPTriCmdSize
 
 
 // 0x0DB0-0x0FB8: Second RDP Command Buffer
 rdpCmdBuffer2:
     .skip RDP_CMD_BUFSIZE
 rdpCmdBuffer2End:
-    .skip RDP_CMD_BUFSIZE_EXCESS
+    .skip maxRDPTriCmdSize
 
 .if . > 0x00000FC0
     .error "Not enough room in DMEM"

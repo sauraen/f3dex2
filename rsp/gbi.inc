@@ -171,3 +171,5 @@ VTX_INV_W_FRAC  equ 0x22
   VTX_FLAGS     equ 0x24
 VTX_FLAGS_LO    equ 0x24
 VTX_FLAGS_HI    equ 0x26
+
+maxRDPTriCmdSize equ 0xB0
