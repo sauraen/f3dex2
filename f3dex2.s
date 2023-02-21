@@ -197,10 +197,10 @@ spFxBase:
 clipRatio: // This is an array of 6 doublewords
 // G_MWO_CLIP_R** point to the second word of each of these, and end up setting
 // the Z scale (always 0 for X and Y components) and the W scale (clip ratio)
-    .dw 0x00010000, 0x00000002 // 1 * x,    G_MWO_CLIP_RNX * w = negative x clip
-    .dw 0x00000001, 0x00000002 // 1 * y,    G_MWO_CLIP_RNY * w = negative y clip
-    .dw 0x00010000, 0x0000FFFE // 1 * x, (-)G_MWO_CLIP_RPX * w = positive x clip
-    .dw 0x00000001, 0x0000FFFE // 1 * x, (-)G_MWO_CLIP_RPY * w = positive y clip
+    .dw 0x00010000, 0x00000001 // 1 * x,    G_MWO_CLIP_RNX * w = negative x clip
+    .dw 0x00000001, 0x00000001 // 1 * y,    G_MWO_CLIP_RNY * w = negative y clip
+    .dw 0x00010000, 0x0000FFFF // 1 * x, (-)G_MWO_CLIP_RPX * w = positive x clip
+    .dw 0x00000001, 0x0000FFFF // 1 * x, (-)G_MWO_CLIP_RPY * w = positive y clip
     .dw 0x00000000, 0x0001FFFF // 1 * z,  -1 * w = far clip
 .if CFG_NoN
     .dw 0x00000000, 0x00000001 // 0 * all, 1 * w = no nearclipping
@@ -352,7 +352,7 @@ movememTable:
 movewordTable:
     .dh mvpMatrix        // G_MW_MATRIX
     .dh numLightsx18 - 3 // G_MW_NUMLIGHT
-    .dh clipRatio        // G_MW_CLIP
+    .dh clipTempVerts    // G_MW_CLIP
     .dh segmentTable     // G_MW_SEGMENT
     .dh fogFactor        // G_MW_FOG
     .dh lightBufferMain  // G_MW_LIGHTCOL
@@ -473,10 +473,10 @@ clipPoly2:         //  \ / \ / \ /
 // to be word-aligned. So this is why it's 10 each.
 
 clipMaskList:
-    .dw CLIP_NX   << CLIP_SHIFT_SCAL
-    .dw CLIP_NY   << CLIP_SHIFT_SCAL
-    .dw CLIP_PX   << CLIP_SHIFT_SCAL
-    .dw CLIP_PY   << CLIP_SHIFT_SCAL
+    .dw CLIP_NX   << CLIP_SHIFT_SCRN
+    .dw CLIP_NY   << CLIP_SHIFT_SCRN
+    .dw CLIP_PX   << CLIP_SHIFT_SCRN
+    .dw CLIP_PY   << CLIP_SHIFT_SCRN
     .dw CLIP_FAR  << CLIP_SHIFT_SCRN
     .dw CLIP_NEAR << CLIP_SHIFT_SCRN
 
@@ -1450,7 +1450,7 @@ load_spfx_global_values:
     vmrg    vFogMask, vZero, vOne[0]              // Put 0 in most elems, 1 in elems 3,7
     llv     vVpMisc[8], (perspNorm)($zero)        // Perspective normalization long (actually short)
     vmrg    vVpFgOffset, vVpFgOffset, $v29[1]     // Put fog offset in elements 3,7 of vtrans
-    lsv     vVpMisc[10], (clipRatio + 6 - spFxBase)(spFxBaseReg) // Clip ratio (-x version, but normally +/- same in all dirs)
+    lsv     vVpMisc[10], (linearGenerateCoefficients + 6 - spFxBase)(spFxBaseReg) // Clip ratio (-x version, but normally +/- same in all dirs)
     vmov    vVpFgScale[1], vVpNegScale[1]         // Negate vscale[1] because RDP top = y=0
     jr      $ra
      addi   secondVtxPos, rdpCmdBufPtr, 0x50      // Pointer to currently unused memory in command buffer
