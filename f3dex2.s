@@ -609,9 +609,9 @@ mxr0f        equ $v12
 mxr1f        equ $v13
 mxr2f        equ $v14
 mxr3f        equ $v15
-vPairST      equ $v22 // global
-vPairMVPPosF equ $v23 // global
-vPairMVPPosI equ $v24 // global
+vPairST      equ $v22
+vPairMVPPosF equ $v23
+vPairMVPPosI equ $v24
 // v25: prev vertex screen pos
 // v26: prev vertex screen Z
 // For point lighting
@@ -1478,13 +1478,16 @@ tri_to_rdp:
     move    $4, $1                // Save original vertex 1 addr (pre-shuffle) for flat shading
 tri_to_rdp_noinit:
     // ra is next cmd, second tri in TRI2, or middle of clipping
-    vnxor   $v5, vZero, $v31[7]     // v5 = 0x8000
+tAtHF equ $v5 // Triangle Attribute High (vertex 1 after shuffle) Fractional
+tAtMF equ $v7 // Mid (vertex 2 after shuffle)
+tAtLF equ $v9 // Low (vertex 3 after shuffle)
+    vnxor   tAtHF, vZero, $v31[7]     // v5 = 0x8000, init fractional value of color (for rounding?)
     llv     $v6[0], VTX_SCR_VEC($1) // Load pixel coords of vertex 1 into v6 (elems 0, 1 = x, y)
-    vnxor   $v7, vZero, $v31[7]     // v7 = 0x8000
+    vnxor   tAtMF, vZero, $v31[7]     // v7 = 0x8000
     llv     $v4[0], VTX_SCR_VEC($2) // Load pixel coords of vertex 2 into v4
     vmov    $v6[6], $v2[5]          // elem 6 of v6 = vertex 1 addr
     llv     $v8[0], VTX_SCR_VEC($3) // Load pixel coords of vertex 3 into v8
-    vnxor   $v9, vZero, $v31[7]     // v9 = 0x8000
+    vnxor   tAtLF, vZero, $v31[7]     // v9 = 0x8000
     lw      $5, VTX_CLIP($1)
     vmov    $v8[6], $v2[7]          // elem 6 of v8 = vertex 3 addr
     lw      $6, VTX_CLIP($2)
@@ -1532,34 +1535,41 @@ tri_to_rdp_noinit:
     llv     $v13[0], VTX_INV_W_VEC($1)
     vsub    $v15, $v10, $v2
     llv     $v13[8], VTX_INV_W_VEC($2)
-    vmudh   $v16, $v6, $v8[0]
+tSclAF equ $v16
+tSclAI equ $v17
+tSclRF equ $v23
+tSclRI equ $v24
+    vmudh   tSclAF, $v6, $v8[0]
     llv     $v13[12], VTX_INV_W_VEC($3)
-    vmadh   $v16, $v8, $v11[0]
+    vmadh   tSclAF, $v8, $v11[0]
     sll     $11, $6, 10             // Moves the value of G_SHADING_SMOOTH into the sign bit
-    vreadacc $v17, ACC_UPPER
+    vreadacc tSclAI, ACC_UPPER
+tAtHI equ $v18 // Triangle Attribute High Integer
+tAtMI equ $v19
+tAtLI equ $v21
     bgez    $11, no_smooth_shading  // Branch if G_SHADING_SMOOTH isn't set
-     vreadacc $v16, ACC_MIDDLE
-    lpv     $v18[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
+     vreadacc tSclAF, ACC_MIDDLE
+    lpv     tAtHI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
     vmov    $v15[2], $v6[0]
-    lpv     $v19[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
+    lpv     tAtMI[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
     vrcp    $v20[0], $v15[1]
-    lpv     $v21[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
-    vrcph   vPairST[0], $v17[1]
-    vrcpl   vPairMVPPosF[1], $v16[1]
+    lpv     tAtLI[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
+    vrcph   vPairST[0], tSclAI[1]
+    vrcpl   tSclRF[1], tSclAF[1]
     j       shading_done
-     vrcph   vPairMVPPosI[1], vZero[0]
+     vrcph   tSclRI[1], vZero[0]
 no_smooth_shading:
-    lpv     $v18[0], VTX_COLOR_VEC($4)
+    lpv     tAtHI[0], VTX_COLOR_VEC($4)
     vrcp    $v20[0], $v15[1]
-    lbv     $v18[6], VTX_COLOR_A($1)
-    vrcph   vPairST[0], $v17[1]
-    lpv     $v19[0], VTX_COLOR_VEC($4)
-    vrcpl   vPairMVPPosF[1], $v16[1]
-    lbv     $v19[6], VTX_COLOR_A($2)
-    vrcph   vPairMVPPosI[1], vZero[0]
-    lpv     $v21[0], VTX_COLOR_VEC($4)
+    lbv     tAtHI[6], VTX_COLOR_A($1)
+    vrcph   vPairST[0], tSclAI[1]
+    lpv     tAtMI[0], VTX_COLOR_VEC($4)
+    vrcpl   tSclRF[1], tSclAF[1]
+    lbv     tAtMI[6], VTX_COLOR_A($2)
+    vrcph   tSclRI[1], vZero[0]
+    lpv     tAtLI[0], VTX_COLOR_VEC($4)
     vmov    $v15[2], $v6[0]
-    lbv     $v21[6], VTX_COLOR_A($3)
+    lbv     tAtLI[6], VTX_COLOR_A($3)
 shading_done:
     // Not sure what the underlying reason for this change is, perhaps a bugfix
     // or a way to improve the fractional precision sent to the RDP.
@@ -1591,11 +1601,11 @@ shading_done:
     vrcph   vPairST[3], $v8[1]
     lw      secondVtxPos, VTX_INV_W_VEC($3)
     // v30[i1] is 0x0100
-    vmudl   $v18, $v18, $v30[i1] // vertex color 1 >>= 8
+    vmudl   tAtHI, tAtHI, $v30[i1] // vertex color 1 >>= 8
     lbu     $9, textureSettings1 + 3
-    vmudl   $v19, $v19, $v30[i1] // vertex color 2 >>= 8
+    vmudl   tAtMI, tAtMI, $v30[i1] // vertex color 2 >>= 8
     sub     $11, $5, $7
-    vmudl   $v21, $v21, $v30[i1] // vertex color 3 >>= 8
+    vmudl   tAtLI, tAtLI, $v30[i1] // vertex color 3 >>= 8
     sra     $12, $11, 31
     vmov    $v15[3], $v8[0]
     and     $11, $11, $12
@@ -1614,20 +1624,20 @@ shading_done:
     vsub    $v26, vZero, vZero
     llv     $v27[0], 0x0010(rdpCmdBufPtr)
     vmudm   $v29, $v25, $v20
-    mfc2    $5, $v17[1]
+    mfc2    $5, tSclAI[1]
     vmadl   $v29, $v15, $v20
     lbu     $7, textureSettings1 + 2
     vmadn   $v20, $v15, vPairST
-    lsv     $v19[14], VTX_SCR_Z($2)
+    lsv     tAtMI[14], VTX_SCR_Z($2)
     vmadh   $v15, $v25, vPairST
-    lsv     $v21[14], VTX_SCR_Z($3)
-    vmudl   $v29, vPairMVPPosF, $v16
-    lsv     $v7[14], VTX_SCR_Z_FRAC($2)
-    vmadm   $v29, vPairMVPPosI, $v16
-    lsv     $v9[14], VTX_SCR_Z_FRAC($3)
-    vmadn   $v16, vPairMVPPosF, $v17
+    lsv     tAtLI[14], VTX_SCR_Z($3)
+    vmudl   $v29, tSclRF, tSclAF
+    lsv     tAtMF[14], VTX_SCR_Z_FRAC($2)
+    vmadm   $v29, tSclRI, tSclAF
+    lsv     tAtLF[14], VTX_SCR_Z_FRAC($3)
+    vmadn   tSclAF, tSclRF, tSclAI
     ori     $11, $6, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
-    vmadh   $v17, vPairMVPPosI, $v17
+    vmadh   tSclAI, tSclRI, tSclAI
     or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
 .if !CFG_OLD_TRI_WRITE
     vand    vPairST, $v20, $v30[5]
@@ -1636,9 +1646,9 @@ shading_done:
     sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
     vmudh   $v29, vOne, $v30[i5]
     ssv     $v10[2], 0x0002(rdpCmdBufPtr) // Store YL edge coefficient
-    vmadn   $v16, $v16, $v30[4]     // v30[4] is 0xFFF0
+    vmadn   tSclAF, tSclAF, $v30[4]     // v30[4] is 0xFFF0
     ssv     $v2[2], 0x0004(rdpCmdBufPtr) // Store YM edge coefficient
-    vmadh   $v17, $v17, $v30[4]     // v30[4] is 0xFFF0
+    vmadh   tSclAI, tSclAI, $v30[4]     // v30[4] is 0xFFF0
     ssv     $v14[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
     vmudn   $v29, $v3, $v14[0]
     andi    $12, $5, 0x0080 // Extract the left major flag from $5
@@ -1661,7 +1671,7 @@ shading_done:
     llv     vPairST[8], VTX_TC_VEC($2)
     vmadh   $v13, $v13, $v27[0]
     vor     $v10, vZero, $v31[7]
-    vge     $v29, $v30, $v30[7]
+    vge     $v29, $v30, $v30[7]     // Set VCC to 11110001
     llv     $v10[8], VTX_TC_VEC($3)
     vmudm   $v29, vPairST, $v14[0h]
     vmadh   vPairST, vPairST, $v13[0h]
@@ -1670,119 +1680,138 @@ shading_done:
     vmadh   $v10, $v10, $v13[6]     // acc += (v10 * v13[6]) << 16; v10 = mid(clamp(acc))
     vmadn   $v13, vZero, vZero[0]   // v13 = lo(clamp(acc))
     sdv     vPairST[0], 0x0020(rdpCmdBufPtr)
-    vmrg    $v19, $v19, vPairST
+    vmrg    tAtMI, tAtMI, vPairST
     sdv     $v25[0], 0x0028(rdpCmdBufPtr) // 8
-    vmrg    $v7, $v7, $v25
-    ldv     $v18[8], 0x0020(rdpCmdBufPtr) // 8
-    vmrg    $v21, $v21, $v10
-    ldv     $v5[8], 0x0028(rdpCmdBufPtr) // 8
-    vmrg    $v9, $v9, $v13
+    vmrg    tAtMF, tAtMF, $v25
+    ldv     tAtHI[8], 0x0020(rdpCmdBufPtr) // 8
+    vmrg    tAtLI, tAtLI, $v10
+    ldv     tAtHF[8], 0x0028(rdpCmdBufPtr) // 8
+    vmrg    tAtLF, tAtLF, $v13
 no_textures:
-    vmudl   $v29, $v16, vPairMVPPosF
-    lsv     $v5[14], VTX_SCR_Z_FRAC($1)
-    vmadm   $v29, $v17, vPairMVPPosF
-    lsv     $v18[14], VTX_SCR_Z($1)
-    vmadn   vPairMVPPosF, $v16, vPairMVPPosI
+    vmudl   $v29, tSclAF, tSclRF
+    lsv     tAtHF[14], VTX_SCR_Z_FRAC($1)
+    vmadm   $v29, tSclAI, tSclRF
+    lsv     tAtHI[14], VTX_SCR_Z($1)
+    vmadn   tSclRF, tSclAF, tSclRI
     lh      $1, VTX_SCR_VEC($2)
-    vmadh   vPairMVPPosI, $v17, vPairMVPPosI
+    vmadh   tSclRI, tSclAI, tSclRI
     addiu   $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
-    vsubc   $v10, $v9, $v5
+// 
+tAtDLHF equ $v10 // Triangle Attribute Difference of Low - High, Fractional
+tAtDLHI equ $v9  // Integer
+tAtDMHF equ $v13 // Mid - High
+tAtDMHI equ $v7
+    vsubc   tAtDLHF, tAtLF, tAtHF
     andi    $3, $6, G_SHADE
-    vsub    $v9, $v21, $v18
+    vsub    tAtDLHI, tAtLI, tAtHI
     sll     $1, $1, 14
-    vsubc   $v13, $v7, $v5
+    vsubc   tAtDMHF, tAtMF, tAtHF
     sw      $1, 0x0008(rdpCmdBufPtr)         // Store XL edge coefficient
-    vsub    $v7, $v19, $v18
+    vsub    tAtDMHI, tAtMI, tAtHI
     ssv     $v3[6], 0x0010(rdpCmdBufPtr)     // Store XH edge coefficient (integer part)
-    vmudn   $v29, $v10, $v6[1]
+// 
+tDDxF equ $v2
+tDDxI equ $v3
+    vmudn   $v29, tAtDLHF, $v6[1]
     ssv     $v2[6], 0x0012(rdpCmdBufPtr)     // Store XH edge coefficient (fractional part)
-    vmadh   $v29, $v9, $v6[1]
+    vmadh   $v29, tAtDLHI, $v6[1]
     ssv     $v3[4], 0x0018(rdpCmdBufPtr)     // Store XM edge coefficient (integer part)
-    vmadn   $v29, $v13, $v12[1]
+    vmadn   $v29, tAtDMHF, $v12[1]
     ssv     $v2[4], 0x001A(rdpCmdBufPtr)     // Store XM edge coefficient (fractional part)
-    vmadh   $v29, $v7, $v12[1]
+    vmadh   $v29, tAtDMHI, $v12[1]
     ssv     $v15[0], 0x000C(rdpCmdBufPtr)    // Store DxLDy edge coefficient (integer part)
-    vreadacc $v2, ACC_MIDDLE
+    vreadacc tDDxF, ACC_MIDDLE
     ssv     $v20[0], 0x000E(rdpCmdBufPtr)    // Store DxLDy edge coefficient (fractional part)
-    vreadacc $v3, ACC_UPPER
+    vreadacc tDDxI, ACC_UPPER
     ssv     $v15[6], 0x0014(rdpCmdBufPtr)    // Store DxHDy edge coefficient (integer part)
-    vmudn   $v29, $v13, $v8[0]
+// 
+tDDyF equ $v6
+tDDyI equ $v7 // replaces tAtDMHI
+    vmudn   $v29, tAtDMHF, $v8[0]
     ssv     $v20[6], 0x0016(rdpCmdBufPtr)    // Store DxHDy edge coefficient (fractional part)
-    vmadh   $v29, $v7, $v8[0]
+    vmadh   $v29, tAtDMHI, $v8[0]
     ssv     $v15[4], 0x001C(rdpCmdBufPtr)    // Store DxMDy edge coefficient (integer part)
-    vmadn   $v29, $v10, $v11[0]
+    vmadn   $v29, tAtDLHF, $v11[0]
     ssv     $v20[4], 0x001E(rdpCmdBufPtr)    // Store DxMDy edge coefficient (fractional part)
-    vmadh   $v29, $v9, $v11[0]
-    sll     $11, $3, 4              // Shift (geometry mode & G_SHADE) by 4 to get 0x40 if G_SHADE is set
-    vreadacc $v6, ACC_MIDDLE
-    add     $1, $2, $11             // Increment the triangle pointer by 0x40 bytes (shade coefficients) if G_SHADE is set
-    vreadacc $v7, ACC_UPPER
-    sll     $11, $9, 5              // Shift texture enabled (which is 2 when on) by 5 to get 0x40 if textures are on
-    vmudl   $v29, $v2, vPairMVPPosF[1]
-    add     rdpCmdBufPtr, $1, $11            // Increment the triangle pointer by 0x40 bytes (texture coefficients) if textures are on
-    vmadm   $v29, $v3, vPairMVPPosF[1]
-    andi    $6, $6, G_ZBUFFER       // Get the value of G_ZBUFFER from the current geometry mode
-    vmadn   $v2, $v2, vPairMVPPosI[1]
-    sll     $11, $6, 4              // Shift (geometry mode & G_ZBUFFER) by 4 to get 0x10 if G_ZBUFFER is set
-    vmadh   $v3, $v3, vPairMVPPosI[1]
-    add     rdpCmdBufPtr, rdpCmdBufPtr, $11           // Increment the triangle pointer by 0x10 bytes (depth coefficients) if G_ZBUFFER is set
-    vmudl   $v29, $v6, vPairMVPPosF[1]
-    vmadm   $v29, $v7, vPairMVPPosF[1]
-    vmadn   $v6, $v6, vPairMVPPosI[1]
-    sdv     $v2[0], 0x0018($2)      // Store DrDx, DgDx, DbDx, DaDx shade coefficients (fractional)
-    vmadh   $v7, $v7, vPairMVPPosI[1]
-    sdv     $v3[0], 0x0008($2)      // Store DrDx, DgDx, DbDx, DaDx shade coefficients (integer)
-    vmadl   $v29, $v2, $v20[3]
-    sdv     $v2[8], 0x0018($1)      // Store DsDx, DtDx, DwDx texture coefficients (fractional)
-    vmadm   $v29, $v3, $v20[3]
-    sdv     $v3[8], 0x0008($1)      // Store DsDx, DtDx, DwDx texture coefficients (integer)
-    vmadn   $v8, $v2, $v15[3]
-    sdv     $v6[0], 0x0038($2)      // Store DrDy, DgDy, DbDy, DaDy shade coefficients (fractional)
-    vmadh   $v9, $v3, $v15[3]
-    sdv     $v7[0], 0x0028($2)      // Store DrDy, DgDy, DbDy, DaDy shade coefficients (integer)
-    vmudn   $v29, $v5, vOne[0]
-    sdv     $v6[8], 0x0038($1)      // Store DsDy, DtDy, DwDy texture coefficients (fractional)
-    vmadh   $v29, $v18, vOne[0]
-    sdv     $v7[8], 0x0028($1)      // Store DsDy, DtDy, DwDy texture coefficients (integer)
-    vmadl   $v29, $v8, $v4[1]
-    sdv     $v8[0], 0x0030($2)      // Store DrDe, DgDe, DbDe, DaDe shade coefficients (fractional)
-    vmadm   $v29, $v9, $v4[1]
-    sdv     $v9[0], 0x0020($2)      // Store DrDe, DgDe, DbDe, DaDe shade coefficients (integer)
-    vmadn   $v5, $v8, $v26[1]
-    sdv     $v8[8], 0x0030($1)      // Store DsDe, DtDe, DwDe texture coefficients (fractional)
-    vmadh   $v18, $v9, $v26[1]
-    sdv     $v9[8], 0x0020($1)      // Store DsDe, DtDe, DwDe texture coefficients (integer)
-    vmudn   $v10, $v8, $v4[1]
+    vmadh   $v29, tAtDLHI, $v11[0]
+    sll     $11, $3, 4                // Shift (geometry mode & G_SHADE) by 4 to get 0x40 if G_SHADE is set
+    vreadacc tDDyF, ACC_MIDDLE
+    add     $1, $2, $11               // Increment the triangle pointer by 0x40 bytes (shade coefficients) if G_SHADE is set
+    vreadacc tDDyI, ACC_UPPER
+    sll     $11, $9, 5                // Shift texture enabled (which is 2 when on) by 5 to get 0x40 if textures are on
+// 
+    vmudl   $v29, tDDxF, tSclRF[1]
+    add     rdpCmdBufPtr, $1, $11     // Increment the triangle pointer by 0x40 bytes (texture coefficients) if textures are on
+    vmadm   $v29, tDDxI, tSclRF[1]
+    andi    $6, $6, G_ZBUFFER         // Get the value of G_ZBUFFER from the current geometry mode
+    vmadn   tDDxF, tDDxF, tSclRI[1]
+    sll     $11, $6, 4                // Shift (geometry mode & G_ZBUFFER) by 4 to get 0x10 if G_ZBUFFER is set
+    vmadh   tDDxI, tDDxI, tSclRI[1]
+    add     rdpCmdBufPtr, rdpCmdBufPtr, $11  // Increment the triangle pointer by 0x10 bytes (depth coefficients) if G_ZBUFFER is set
+// 
+tDDeF equ $v8
+tDDeI equ $v9 // replaces tAtDLHI
+    vmudl   $v29, tDDyF, tSclRF[1]
+    vmadm   $v29, tDDyI, tSclRF[1]
+    vmadn   tDDyF, tDDyF, tSclRI[1]
+    sdv     tDDxF[0], 0x0018($2)      // Store DrDx, DgDx, DbDx, DaDx shade coefficients (fractional)
+    vmadh   tDDyI, tDDyI, tSclRI[1]
+    sdv     tDDxI[0], 0x0008($2)      // Store DrDx, DgDx, DbDx, DaDx shade coefficients (integer)
+    vmadl   $v29, tDDxF, $v20[3]
+    sdv     tDDxF[8], 0x0018($1)      // Store DsDx, DtDx, DwDx texture coefficients (fractional)
+    vmadm   $v29, tDDxI, $v20[3]
+    sdv     tDDxI[8], 0x0008($1)      // Store DsDx, DtDx, DwDx texture coefficients (integer)
+    vmadn   tDDeF, tDDxF, $v15[3]
+    sdv     tDDyF[0], 0x0038($2)      // Store DrDy, DgDy, DbDy, DaDy shade coefficients (fractional)
+    vmadh   tDDeI, tDDxI, $v15[3]
+    sdv     tDDyI[0], 0x0028($2)      // Store DrDy, DgDy, DbDy, DaDy shade coefficients (integer)
+// 
+tBaseF equ $v5  // replaces tAtHF
+tBaseI equ $v18 // replaces tAtHI
+    vmudn   $v29, tAtHF, vOne[0]
+    sdv     tDDyF[8], 0x0038($1)      // Store DsDy, DtDy, DwDy texture coefficients (fractional)
+    vmadh   $v29, tAtHI, vOne[0]
+    sdv     tDDyI[8], 0x0028($1)      // Store DsDy, DtDy, DwDy texture coefficients (integer)
+    vmadl   $v29, tDDeF, $v4[1]
+    sdv     tDDeF[0], 0x0030($2)      // Store DrDe, DgDe, DbDe, DaDe shade coefficients (fractional)
+    vmadm   $v29, tDDeI, $v4[1]
+    sdv     tDDeI[0], 0x0020($2)      // Store DrDe, DgDe, DbDe, DaDe shade coefficients (integer)
+    vmadn   tBaseF, tDDeF, $v26[1]
+    sdv     tDDeF[8], 0x0030($1)      // Store DsDe, DtDe, DwDe texture coefficients (fractional)
+    vmadh   tBaseI, tDDeI, $v26[1]
+    sdv     tDDeI[8], 0x0020($1)      // Store DsDe, DtDe, DwDe texture coefficients (integer)
+//
+    vmudn   $v10, tDDeF, $v4[1]
     beqz    $6, no_z_buffer
-     vmudn  $v8, $v8, $v30[i6]      // v30[i6] is 0x0020
-    vmadh   $v9, $v9, $v30[i6]      // v30[i6] is 0x0020
-    sdv     $v5[0], 0x0010($2)      // Store RGBA shade color (fractional)
-    vmudn   $v2, $v2, $v30[i6]      // v30[i6] is 0x0020
-    sdv     $v18[0], 0x0000($2)     // Store RGBA shade color (integer)
-    vmadh   $v3, $v3, $v30[i6]      // v30[i6] is 0x0020
-    sdv     $v5[8], 0x0010($1)      // Store S, T, W texture coefficients (fractional)
-    vmudn   $v6, $v6, $v30[i6]      // v30[i6] is 0x0020
-    sdv     $v18[8], 0x0000($1)     // Store S, T, W texture coefficients (integer)
-    vmadh   $v7, $v7, $v30[i6]      // v30[i6] is 0x0020
-    ssv     $v8[14], -0x0006(rdpCmdBufPtr)
-    vmudl   $v29, $v10, $v30[i6]    // v30[i6] is 0x0020
-    ssv     $v9[14], -0x0008(rdpCmdBufPtr)
-    vmadn   $v5, $v5, $v30[i6]      // v30[i6] is 0x0020
-    ssv     $v2[14], -0x000A(rdpCmdBufPtr)
-    vmadh   $v18, $v18, $v30[i6]    // v30[i6] is 0x0020
-    ssv     $v3[14], -0x000C(rdpCmdBufPtr)
-    ssv     $v6[14], -0x0002(rdpCmdBufPtr)
-    ssv     $v7[14], -0x0004(rdpCmdBufPtr)
-    ssv     $v5[14], -0x000E(rdpCmdBufPtr)
-    j       check_rdp_buffer_full   // eventually returns to $ra, which is next cmd, second tri in TRI2, or middle of clipping
-    ssv     $v18[14], -0x10(rdpCmdBufPtr)
+     vmudn  tDDeF, tDDeF, $v30[i6]    // v30[i6] is 0x0020
+    vmadh   tDDeI, tDDeI, $v30[i6]    // v30[i6] is 0x0020
+    sdv     tBaseF[0], 0x0010($2)     // Store RGBA shade color (fractional)
+    vmudn   tDDxF, tDDxF, $v30[i6]    // v30[i6] is 0x0020
+    sdv     tBaseI[0], 0x0000($2)     // Store RGBA shade color (integer)
+    vmadh   tDDxI, tDDxI, $v30[i6]    // v30[i6] is 0x0020
+    sdv     tBaseF[8], 0x0010($1)     // Store S, T, W texture coefficients (fractional)
+    vmudn   tDDyF, tDDyF, $v30[i6]    // v30[i6] is 0x0020
+    sdv     tBaseI[8], 0x0000($1)     // Store S, T, W texture coefficients (integer)
+    vmadh   tDDyI, tDDyI, $v30[i6]    // v30[i6] is 0x0020
+    ssv     tDDeF[14], -0x0006(rdpCmdBufPtr)
+    vmudl   $v29, $v10, $v30[i6]      // v30[i6] is 0x0020
+    ssv     tDDeI[14], -0x0008(rdpCmdBufPtr)
+    vmadn   tBaseF, tBaseF, $v30[i6]  // v30[i6] is 0x0020
+    ssv     tDDxF[14], -0x000A(rdpCmdBufPtr)
+    vmadh   tBaseI, tBaseI, $v30[i6]  // v30[i6] is 0x0020
+    ssv     tDDxI[14], -0x000C(rdpCmdBufPtr)
+    ssv     tDDyF[14], -0x0002(rdpCmdBufPtr)
+    ssv     tDDyI[14], -0x0004(rdpCmdBufPtr)
+    ssv     tBaseF[14], -0x000E(rdpCmdBufPtr)
+    j       check_rdp_buffer_full     // eventually returns to $ra, which is next cmd, second tri in TRI2, or middle of clipping
+    ssv     tBaseI[14], -0x10(rdpCmdBufPtr)
 
 no_z_buffer:
-    sdv     $v5[0], 0x0010($2)      // Store RGBA shade color (fractional)
-    sdv     $v18[0], 0x0000($2)     // Store RGBA shade color (integer)
-    sdv     $v5[8], 0x0010($1)      // Store S, T, W texture coefficients (fractional)
-    j       check_rdp_buffer_full   // eventually returns to $ra, which is next cmd, second tri in TRI2, or middle of clipping
-     sdv    $v18[8], 0x0000($1)     // Store S, T, W texture coefficients (integer)
+    sdv     tBaseF[0], 0x0010($2)     // Store RGBA shade color (fractional)
+    sdv     tBaseI[0], 0x0000($2)     // Store RGBA shade color (integer)
+    sdv     tBaseF[8], 0x0010($1)     // Store S, T, W texture coefficients (fractional)
+    j       check_rdp_buffer_full     // eventually returns to $ra, which is next cmd, second tri in TRI2, or middle of clipping
+     sdv    tBaseI[8], 0x0000($1)     // Store S, T, W texture coefficients (integer)
 
 vtxPtr    equ $25 // = cmd_w0
 endVtxPtr equ $24 // = cmd_w1_dram
