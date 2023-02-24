@@ -1127,11 +1127,13 @@ clipping_skipswap23: // After possible swap, $19 = vtx not meeting clip cond / o
     vmrg    $v10, $v10, vOne[0]       // keep frac part of factor, else set to 1 (min val)
     vmudn   $v2, $v10, $v31[0]        // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for on screen vert
     // Fade between attributes for on screen and off screen vert
-    vmudl   $v29, $v6, $v10[3]        //   Fade factor for off screen vert * off screen vert pos frac
-    vmadm   $v29, $v7, $v10[3]        // + Fade factor for off screen vert * off screen vert pos int
-    vmadl   $v29, $v4, $v2[3]         // + Fade factor for on  screen vert * on  screen vert pos frac
-    vmadm   vPairMVPPosI, $v5, $v2[3] // + Fade factor for on  screen vert * on  screen vert pos int
-    vmadn   vPairMVPPosF, vZero, vZero[0] // Load resulting frac pos
+    vmudl   $v29, $v4, $v2[3]         //   Fade factor for on  screen vert * on  screen vert pos frac
+    // v12:v11[3] is on screen vertex W * on screen fade factor
+    vmadm   $v12, $v5, $v2[3]         // + Fade factor for on  screen vert * on  screen vert pos int
+    vmadn   $v11, vZero, vZero        //   Load resulting frac pos
+    vmadl   $v29, $v6, $v10[3]        // + Fade factor for off screen vert * off screen vert pos frac
+    vmadm   vPairMVPPosI, $v7, $v10[3] // + Fade factor for off screen vert * off screen vert pos int
+    vmadn   vPairMVPPosF, vZero, vZero // Load resulting frac pos
     vmudm   $v29, $v26, $v10[3]       //   Fade factor for off screen vert * off screen vert color and TC
     vmadm   vPairST, $v25, $v2[3]     // + Fade factor for on  screen vert * on  screen vert color and TC
     li      $7, 0x0000 // Set no fog
@@ -1148,8 +1150,41 @@ clipping_after_vtxwrite:
 .else
     slv     $v25[0],    (VTX_SCR_VEC    - 2 * vtxSize)(outputVtxPos)
 .endif
+    vmudl   $v29, $v11, vVpMisc[4]    // Persp norm
+    vmadm   $v12, $v12, vVpMisc[4]
+    vmadn   $v11, vZero, vZero
+    // v12:v11[3] is persp norm * on screen W * on screen fade factor, v4:v5[3] is 1/W for middle
+    vmudl   $v29, $v11, $v5
+    // Store flag for whether this vertex was clipped due to near clipping
+    andi    $10, $9, CLIP_NEAR // Are we doing near clipping? $9 is clip mask
+    vmadm   $v29, $v12, $v5
+    srl     $10, $10, 7 // Shift into bit 1
+    vmadn   $v10, $v11, $v4 // Frac part of product
+    or      $11, $11, $10  // Or with scaled flags which are still in $11
+    vmadh   $v11, $v12, $v4 // Int part of product
+    sh      $11,        (VTX_CLIP_SCAL  - 2 * vtxSize)(outputVtxPos) // Store updated flags
+    // Clamp this, same code as above
+    vlt     $v11, $v11, vOne[0]       // If integer part of factor less than 1,
+    luv     $v5[0], VTX_COLOR_VEC($19) // Vtx on screen, RGBA
+    vmrg    $v10, $v10, $v31[0]       // keep frac part of factor, else set to 0xFFFF (max val)
+    luv     $v4[0], VTX_COLOR_VEC($3)  // Vtx off screen, RGBA
+    vsubc   $v29, $v10, vOne[0]       // frac part - 1 for carry
+    lh      $11,        VTX_CLIP_SCAL($3) // Was the off-screen vertex clipped due to near clipping?
+    vge     $v11, $v11, vZero[0]      // If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
+    or      $10, $10, $11
+    vmrg    $v10, $v10, vOne[0]       // keep frac part of factor, else set to 1 (min val). Factor for on screen vert
+    lh      $11,        VTX_CLIP_SCAL($19) // Was the on-screen vertex clipped due to near clipping?
+    vmudn   $v2, $v10, $v31[0]        // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for off screen vert
+    or      $10, $10, $11
+    vmudm   $v29, $v5, $v10[3]
+    andi    $10, $10, 1
+    vmadm   $v11, $v4, $v2[3]         // v11 = resulting colors
+    vmov    vPairST[0], vZero[0]
+    bnez    $10, clip_mod_skip_recalc_color // If any of them are, skip recalculation
+     suv    vPairST[0], (VTX_COLOR_VEC  - 2 * vtxSize)(outputVtxPos)
+    suv     $v11[0],    (VTX_COLOR_VEC  - 2 * vtxSize)(outputVtxPos)
+clip_mod_skip_recalc_color:
     ssv     $v26[4],    (VTX_SCR_Z_FRAC - 2 * vtxSize)(outputVtxPos)
-    suv     vPairST[0], (VTX_COLOR_VEC  - 2 * vtxSize)(outputVtxPos)
     slv     vPairST[8], (VTX_TC_VEC     - 2 * vtxSize)(outputVtxPos)
 .if !BUG_NO_CLAMP_SCREEN_Z_POSITIVE          // Not in F3DEX2 2.04H
     ssv     $v3[4],     (VTX_SCR_Z      - 2 * vtxSize)(outputVtxPos)
@@ -1373,9 +1408,12 @@ vertices_store:
     vmadn   $v5, $v26, $v4
     lsv     vPairMVPPosI[6],  (VTX_Z_INT      - 2 * vtxSize)(outputVtxPos) // load Z into W slot, will be for fog below
     vmadh   $v4, $v25, $v4
-    sh      $10,              (VTX_CLIP_SCRN  - 1 * vtxSize)(secondVtxPos) // XYZW/W second vtx results in bits 0xF0F0
-    vmadh   $v2, $v2, $v31[7]           // Some extended precision thing? 0x7FFF times 0 or 0x7FFF
     sll     $11, $10, 4                 // Shift first vtx screen space clip into positions 0xF0F0
+    andi    $11, $11, 0xF0F0
+    andi    $10, $10, 0xF0F0
+    vmadh   $v2, $v2, $v31[7]           // Some extended precision thing? 0x7FFF times 0 or 0x7FFF
+    sh      $10,              (VTX_CLIP_SCRN  - 1 * vtxSize)(secondVtxPos) // XYZW/W second vtx results in bits 0xF0F0
+    sh      $11,              (VTX_CLIP_SCRN  - 2 * vtxSize)(outputVtxPos) // Clip screen first vtx results
     vcl     $v29, vPairMVPPosF, $v7[3h] // Compare XYZZ to clip-ratio-scaled W (frac part)
     cfc2    $10, $vcc                   // Load 16 bit clip-ratio-scaled results, two verts
     vmudl   $v29, vPairMVPPosF, $v5[3h] // Pos times inv W
@@ -1383,12 +1421,12 @@ vertices_store:
     vmadm   $v29, vPairMVPPosI, $v5[3h] // Pos times inv W
     addi    inputVtxPos, inputVtxPos, (2 * inputVtxSize) // Advance two positions forward in the input vertices
     vmadn   $v26, vPairMVPPosF, $v2[3h] // Pos times inv W extended precision thing?
-    sh      $10,              (VTX_CLIP_SCAL  - 1 * vtxSize)(secondVtxPos) // Clip scaled second vtx results in bits 0xF0F0
+    sll     $11, $10, 4                 // Shift first vtx scaled clip into positions 0xF0F0
+    andi    $11, $11, 0xF0F0
     vmadh   $v25, vPairMVPPosI, $v2[3h] // v25:v26 = pos times inv W
-    sll     $10, $10, 4                 // Shift first vtx scaled clip into positions 0xF0F0
+    andi    $10, $10, 0xF0F0
     vmudm   $v3, vPairST, vVpMisc       // Scale ST for two verts, using TexSScl and TexTScl in elems 2, 3, 6, 7
-    sh      $11,              (VTX_CLIP_SCRN  - 2 * vtxSize)(outputVtxPos) // Clip screen first vtx results
-    sh      $10,              (VTX_CLIP_SCAL  - 2 * vtxSize)(outputVtxPos) // Clip scaled first vtx results
+    sh      $10,              (VTX_CLIP_SCAL  - 1 * vtxSize)(secondVtxPos) // Clip scaled second vtx results in bits 0xF0F0
     vmudl   $v29, $v26, vVpMisc[4]      // Scale result by persp norm
     ssv     $v5[6],           (VTX_INV_W_FRAC - 2 * vtxSize)(outputVtxPos)
     vmadm   $v25, $v25, vVpMisc[4]      // Scale result by persp norm
@@ -1399,6 +1437,7 @@ vertices_store:
     vmudh   $v29, vVpFgOffset, vOne[0]  //   1 * vtrans (and fog offset in elems 3,7)
     slv     $v3[12],          (VTX_TC_VEC     - 2 * vtxSize)(outputVtxPos) // Store scaled S, T vertex 2
     vmadh   $v29, vFogMask, $v31[3]     // + 0x7F00 in fog elements (because auto-clamp to 0x7FFF, and will clamp to 0x7F00 below)
+    sh      $11,              (VTX_CLIP_SCAL  - 2 * vtxSize)(outputVtxPos) // Clip scaled first vtx results
     vmadn   $v26, $v26, vVpFgScale      // + pos frac * scale
     bgtz    $1, vertices_process_pair
      vmadh  $v25, $v25, vVpFgScale      // int part, v25:v26 is now screen space pos
