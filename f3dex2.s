@@ -1192,12 +1192,15 @@ ovl3_clipping_nosavera:
 .endif
     la      clipPolySelect, 6  // Everything being indexed from 6 saves one instruction at the end of the loop
 .if MOD_CLIP_CHANGES
-    // Using $30 (formerly savedRA) for two things:
-    // - Greater than zero if doing clipping, less than zero if normal tri draw outside clipping.
-    //   For whether to check clip masks.
-    // - Tracking how many vertices have been written. This is relative to clipTempVerts,
-    //   but once that is exhausted and wraps, and eventually searches, this keeps going up.
-    la      $30, clipTempVerts - vtxSize
+    // $30 >= 0 indicates doing clipping, i.e. don't check clip masks. Will use this
+    // for something useful later.
+    la      $30, 1
+    // Initialize all temp verts' flags to unused.
+    la      $11, -((clipTempVertsCount - 1) * vtxSize)
+@@loop:
+    sh      $zero, (VTX_CLIP + clipTempVerts + (clipTempVertsCount - 1) * vtxSize)($11)
+    bltz    $11, @@loop
+     addiu  $11, $11, vtxSize
 .else
     la      outputVtxPos, clipTempVerts
 .endif
@@ -1861,6 +1864,7 @@ vertices_store:
     vmadh   $v2, $v2, $v31[7]           // Some extended precision thing? 0x7FFF times 0 or 0x7FFF
 .if MOD_CLIP_CHANGES
     andi    $24, $24, CLIP_MOD_MASK_SCRN_ALL // Mask to only screen bits we care about
+    ori     $12, $12, CLIP_MOD_VTX_USED // Set flag for vertex used; only matters for first vtx in clip write
 .else
     sll     $11, rClipRes, 4            // Shift first vtx screen space clip into positions 0xF0F0
 .endif
