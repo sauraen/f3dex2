@@ -1189,8 +1189,10 @@ ovl3_clipping_nosavera:
     sh      $4, modSaveFlatR4
 .endif
 .if MOD_CLIP_CHANGES
+    // 
+    // Set up values for vertex write
     jal     load_spfx_global_values
-     la     clipMaskIdx, 4
+     la     clipMaskIdx, 4 // This is $5
 .else
     la      clipMaskIdx, 0x0014
 .endif
@@ -1200,11 +1202,11 @@ ovl3_clipping_nosavera:
     // for something useful later.
     la      $30, 1
     // Initialize all temp verts' flags to unused.
-    la      $11, -((clipTempVertsCount - 1) * vtxSize)
+    la      $11, ((clipTempVertsCount - 1) * vtxSize)
 @@loop:
-    sh      $zero, (VTX_CLIP + clipTempVerts + (clipTempVertsCount - 1) * vtxSize)($11)
-    bltz    $11, @@loop
-     addiu  $11, $11, vtxSize
+    sh      $zero, (VTX_CLIP + clipTempVerts)($11)
+    bgtz    $11, @@loop
+     addiu  $11, $11, -vtxSize
 .else
     la      outputVtxPos, clipTempVerts
 .endif
@@ -1246,10 +1248,29 @@ clipping_edgelooptop: // Loop over edges connecting verts, possibly subdivide th
      move   clipFlags, $11                     // clipFlags = masked V2's flags
     // Going to subdivide this edge
 .if MOD_CLIP_CHANGES
-    addiu   $30, $30, vtxSize                  // Next vertex
-    move    outputVtxPos, $30
-    // TODO more logic for wrap, search, etc.
+    // Search for unused vertex
+    la      outputVtxPos, clipTempVerts
+clipping_mod_search_unused_loop:
+    lhu     $11, VTX_CLIP(outputVtxPos)
+    andi    $11, $11, CLIP_MOD_VTX_USED
+    beqz    $11, clipping_mod_contsetupsubdivide
+     la     $1, clipTempVerts + (clipTempVertsCount - 1) * vtxSize // This could be outside the loop, but then we'd need a nop here
+    blt     outputVtxPos, $1, clipping_mod_search_unused_loop
+     addiu  outputVtxPos, outputVtxPos, vtxSize
+    // Unused vertex slot was not found. Draw what we have (the polygon currently being read).
+    xori    clipPolySelect, clipPolySelect, 6 ^ (clipPoly2 + 6 - clipPoly) // Swap to the other polygon memory
+    addiu   clipPolyWrite, clipPolySelect, -2  // Needs to point to the 0; reading 2 above
+    lui     $12, 0xFF01
+    addiu   $12, $12, 0xFFFF
+clipping_mod_search_zero_loop:
+    lhu     $11, (clipPoly + 2)(clipPolyWrite)
+    beqz    $11, clipping_mod_draw_tris
+     addiu  clipPolyWrite, clipPolyWrite, 2
+    j       clipping_mod_search_zero_loop
+     sw     $12, (VTX_COLOR_VEC)($11)          // TODO set vertex color to magenta for testing
+     // Next instruction OK to run in delay slot
 clipping_mod_contsetupsubdivide:
+    andi    $11, clipMaskIdx, 4                // First instruction from below
 .endif
     beqz    clipFlags, clipping_skipswap23     // V2 flag is clear / on screen, therefore V3 is set / off screen
      move   $19, $2                            // 
@@ -1258,7 +1279,6 @@ clipping_mod_contsetupsubdivide:
 clipping_skipswap23: // After possible swap, $19 = vtx not meeting clip cond / on screen, $3 = vtx meeting clip cond / off screen
 .if MOD_CLIP_CHANGES
     // Determine if doing screen or scaled clipping
-    andi    $11, clipMaskIdx, 4
     bnez    $11, clipping_interpolate          // If W, screen clipping
      la     $4, 0
     lhu     $11, VTX_CLIP($3)                  // Load flags for offscreen vertex
