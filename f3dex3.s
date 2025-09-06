@@ -1114,34 +1114,6 @@ start_padded_end:
 .orga max(orga(), max(ovl0_padded_end - ovl0_start, ovl1_padded_end - ovl1_start) - 0x80)
 ovl01_end:
 
-G_CULLDL_handler: // 15
-    lhu     $10, (vertexTable)(cmd_w0)      // Start vtx addr
-    lhu     $3, (vertexTable)(cmd_w1_dram)  // End vertex
-    /*
-    CLIP_OCCLUDED can't be included here because: Suppose the list consists of N-1
-    verts which are behind the occlusion plane, and 1 vert which is behind the camera
-    plane and therefore randomly erroneously also set as behind the occlusion plane.
-    However, the convex hull of all the verts goes through visible area. This will be
-    incorrectly culled here. We can't afford the extra few instructions to disable
-    the occlusion plane if the vert is behind the camera, because this only matters for
-    G_CULLDL and not for tris.
-    */
-    li      $1, (CLIP_SCRN_NPXY | CLIP_CAMPLANE)
-    lhu     $11, VTX_CLIP($10)
-culldl_loop:
-    and     $1, $1, $11
-    beqz    $1, run_next_DL_command         // Some vertex is on the screen-side of all clipping planes; have to render
-     lhu    $11, (vtxSize + VTX_CLIP)($10)  // next vertex clip flags
-    bne     $10, $3, culldl_loop            // loop until reaching the last vertex
-     addi   $10, $10, vtxSize               // advance to the next vertex
-    li      cmd_w0, 0                       // Clear count of DL cmds to skip loading
-G_ENDDL_handler:
-    lbu     $1, displayListStackLength      // Load the DL stack index; if end stack,
-    beqz    $1, load_overlay_0_and_enter    // load overlay 0; $1 < 0 signals end
-     addi   $1, $1, -4                      // Decrement the DL stack index
-    j       call_ret_common                 // has a different version in ovl1
-     lw     taskDataPtr, (displayListStack)($1) // Load addr of DL to return to
-
 G_POPMTX_handler:
 G_DMA_IO_handler:
     j       ovl234_ltbasic_entrypoint   // Delay slot is harmless
@@ -1181,28 +1153,59 @@ displaylist_dma_tri_snake:
     nor     dmaLen, inputBufferPos, $zero              // DMA length = -inputBufferPos - 1 = ones compliment
     move    cmd_w1_dram, taskDataPtr                   // set up the DRAM address to read from
     sub     taskDataPtr, taskDataPtr, inputBufferPos   // increment the DRAM address to read from next time
-    addi    dmemAddr, inputBufferPos, inputBufferEnd   // set the address to DMA read to
-dma_and_wait_goto_next_ra:
-    j       dma_read_write
-     li     $ra, wait_goto_next_ra
+    jal     dma_read_write
+     addi   dmemAddr, inputBufferPos, inputBufferEnd   // set the address to DMA read to
+    mfc0    $1, SP_STATUS                  // Stalls here don't matter cause waiting for DMA
+    andi    $1, $1, SP_STATUS_SIG0         // check if the task should yield
+    bnez    $1, load_overlay_0_and_enter   // load and execute overlay 0 if yielding; $1 > 0
+     sh     nextRA, tempTriRA              // Where to continue after yield
+    j       wait_goto_next_ra
+G_CULLDL_handler:
+     lhu    $10, (vertexTable)(cmd_w0)      // Start vtx addr
+    lhu     $3, (vertexTable)(cmd_w1_dram)  // End vertex
+    /*
+    CLIP_OCCLUDED can't be included here because: Suppose the list consists of N-1
+    verts which are behind the occlusion plane, and 1 vert which is behind the camera
+    plane and therefore randomly erroneously also set as behind the occlusion plane.
+    However, the convex hull of all the verts goes through visible area. This will be
+    incorrectly culled here. We can't afford the extra few instructions to disable
+    the occlusion plane if the vert is behind the camera, because this only matters for
+    G_CULLDL and not for tris.
+    */
+    li      $1, (CLIP_SCRN_NPXY | CLIP_CAMPLANE)
+    lhu     $11, VTX_CLIP($10)
+culldl_loop:
+    and     $1, $1, $11
+    beqz    $1, run_next_DL_command         // Some vertex is on the screen-side of all clipping planes; have to render
+     lhu    $11, (vtxSize + VTX_CLIP)($10)  // next vertex clip flags
+    bne     $10, $3, culldl_loop            // loop until reaching the last vertex
+     addi   $10, $10, vtxSize               // advance to the next vertex
+    li      cmd_w0, 0                       // Clear count of DL cmds to skip loading
+G_ENDDL_handler:
+    lbu     $1, displayListStackLength      // Load the DL stack index; if end stack,
+    beqz    $1, load_overlay_0_and_enter    // load overlay 0; $1 < 0 signals end
+     addi   $1, $1, -4                      // Decrement the DL stack index
+    j       call_ret_common                 // has a different version in ovl1
+     lw     taskDataPtr, (displayListStack)($1) // Load addr of DL to return to
 
 G_MEMSET_handler:
     j       ovl234_clipmisc_entrypoint       // Delay slot is harmless
 load_cmds_handler:
      lb     $3, materialCullMode
     bltz    $3, run_next_DL_command  // If cull mode is < 0, in mat second time, skip the load
+rdp_handler_with_w0:
+     sw     cmd_w0, 0(rdpCmdBufPtr)          // Write out first command word
 G_RDP_handler:
-     sw     cmd_w1_dram, 4(rdpCmdBufPtr)     // Add the second word of the command to the RDP command buffer
+    sw      cmd_w1_dram, 4(rdpCmdBufPtr)     // Write out second command word
 G_SYNC_handler:
 .if CFG_PROFILING_C
     addi    perfCounterC, perfCounterC, 0x4000 // Increment small RDP command count
 .endif
-    sw      cmd_w0, 0(rdpCmdBufPtr)          // Add the command word to the RDP command buffer
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8    // Increment the next RDP command pointer by 2 words
 check_rdp_buffer_full_and_run_next_cmd:
     sub     dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1
     bgezal  dmemAddr, flush_rdp_buffer
-     // $1 on next instr survives flush_rdp_buffer
+     // TODO check that $7 on next instr survives flush_rdp_buffer
 .if !CFG_PROFILING_A
 tris_end:
 .endif
@@ -1211,14 +1214,12 @@ G_LIGHTTORDP_handler:
 .endif
 G_SPNOOP_handler:
 run_next_DL_command:
-     mfc0   $1, SP_STATUS                               // load the status word into register $1
-    lw      cmd_w0, (inputBufferEnd)(inputBufferPos)    // load the command word into cmd_w0
+     lb     $7, (inputBufferEnd)(inputBufferPos)
+    lw      cmd_w0, (inputBufferEnd)(inputBufferPos)    // DL command word
     beqz    inputBufferPos, displaylist_dma             // load more DL commands if none are left
-     andi   $1, $1, SP_STATUS_SIG0                      // check if the task should yield
-    sra     $7, cmd_w0, 24                              // extract DL command byte from command word
-    lbu     $11, (cmdMiniTable)($7)                     // Load mini table entry
-    bnez    $1, load_overlay_0_and_enter                // load and execute overlay 0 if yielding; $1 > 0
-     lw     cmd_w1_dram, (inputBufferEnd + 4)(inputBufferPos) // load the next DL word into cmd_w1_dram
+     lbu    $11, (cmdMiniTable)($7)                     // Load mini table entry
+    sw      cmd_w0, 0(rdpCmdBufPtr)                     // Write out first command word
+    lw      cmd_w1_dram, (inputBufferEnd + 4)(inputBufferPos) // Second DL word
     sll     $11, $11, 2                                 // Convert to a number of instructions
 .if CFG_PROFILING_C
     mfc0    $10, DPC_STATUS
@@ -1238,7 +1239,7 @@ run_next_DL_command:
 .endif
     jr      $11                                         // Jump to handler
      addi   inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
-    // $1 must remain zero
+    TODO // $1 must remain zero
     // $7 must retain the command byte for load_mtx and overlay 3 stuff
     // $11 must contain the handler called for several handlers
 
@@ -1283,7 +1284,7 @@ G_LIGHTTORDP_handler: // 9
     lw      $3, (lightBufferMain-1)($1)  // Load light RGB into lower 3 bytes
     move    cmd_w0, cmd_w1_dram          // Move second word to first (cmd byte, prim level)
     sll     $3, $3, 8                    // Shift light RGB to upper 3 bytes and clear alpha byte
-    j       G_RDP_handler                // Send to RDP
+    j       rdp_handler_with_w0          // Send to RDP
      or     cmd_w1_dram, $3, $2          // Combine RGB and alpha in second word
 .endif
 
@@ -1841,6 +1842,7 @@ ovl234_clipmisc_entrypoint:
 .if CFG_PROFILING_B
     nop                                    // Needs to take up the space for the other perf counter
 .endif
+    TODO
     bnez    $1, vtx_constants_for_clip     // In clipping, $1 is vtx 1 addr, never 0. Cmd dispatch, $1 = 0.
      li     inVtx, 0x8000                  // inVtx < 0 means from clipping. Inc'd each vtx write by 2 * inputVtxSize, but this is large enough it should stay negative.
     lw      cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos) // Overwritten by overlay load
@@ -2653,6 +2655,10 @@ load_overlays_0_1:
     j       load_overlay_inner
      li     dmemAddr, 0x1000
 
+dma_and_wait_goto_next_ra: // TODO merge this with the below
+    j       dma_read_write
+     li     $ra, wait_goto_next_ra
+
 load_overlays_2_3_4:
     addi    nextRA, $ra, -8  // Got here with jal, but want to return to addr of jal itself
     li      dmaLen, ovl234_end - ovl234_start - 1
@@ -2855,7 +2861,7 @@ G_MTX_handler: // 12
      sh     $zero, mvpValid                  // Also zeroes dirLightsXfrmValid
 load_mtx:
     andi    $1, cmd_w0, G_MTX_MUL_LOAD       // Read the matrix load type into $1 (2 is multiply, 0 is load)
-G_MOVEMEM_handler:  // Otherwise $1 is 0
+G_MOVEMEM_handler: TODO // Otherwise $1 is 0
     jal     segmented_to_physical   // convert the memory address cmd_w1_dram to a virtual one
 do_movemem:
      // 0: load M, 2: mul M -> load temp, 4: load VP, 6: mul VP -> load temp
@@ -2932,10 +2938,11 @@ G_SETOTHERMODE_L_handler:
     or      $3, $3, cmd_w1_dram
     sw      $3, (othermode0 - G_SETOTHERMODE_H_handler)($11)
     lw      cmd_w0, otherMode0
-    j       G_RDP_handler
+    j       rdp_handler_with_w0
      lw     cmd_w1_dram, otherMode1
 
 G_RDPSETOTHERMODE_handler: // 4
+    TODO
     li      $1, 8      // Offset from scissor DMEM to othermode DMEM
 G_SETSCISSOR_handler:  // $1 is 0 if jumped here
     sw      cmd_w0, (scissorUpLeft)($1) // otherMode0 = scissorUpLeft + 8
@@ -2963,13 +2970,13 @@ G_RDPHALF_1_handler:
 
 G_RDPHALF_2_handler: // 7
     ldv     $v29[0], (texrectWord1)($zero)
-    lw      cmd_w0, rdpHalf1Val             // load the RDPHALF1 value into w0
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8
+    lw      cmd_w0, rdpHalf1Val             // load the RDPHALF1 value into w0
 .if !ENABLE_PROFILING
     addi    perfCounterB, perfCounterB, 1   // Increment number of tex/fill rects
 .endif
     sb      $zero, materialCullMode         // This covers tex and fill rects
-    j       G_RDP_handler
+    j       rdp_handler_with_w0
      sdv    $v29[0], -8(rdpCmdBufPtr)
 
 G_SETxIMG_handler: // 10
@@ -3034,7 +3041,7 @@ ovl234_clipmisc_entrypoint_ovl2ver:        // same IMEM address as ovl234_clipmi
      li     cmd_w1_dram, orga(ovl3_start)  // set up a load for overlay 3
 
 ltbasic_continue_setup:
-    beqz    $1, ltbasic_command_handlers
+    beqz    $1, ltbasic_command_handlers TODO
      addi   ambLight, ambLight, altBase    // Point to ambient light; stored through vtx proc
     bnez    viLtFlag, ltbasic_setup_after_xfrm  // Skip if lights were valid
      addi   lbFakeAmb, ambLight, ltBufOfs  // Ptr to load amb light from; normally actual ambient light
@@ -3418,7 +3425,7 @@ g_popmtx_ovl2:  // otherwise
      sh     $zero, mvpValid                 // and dirLightsXfrmValid; mark both mtx and dir lts invalid
     move    cmd_w1_dram, $2                 // Use the top of the stack as the new pointer
 @@skip:    
-    j       do_movemem                      // Must keep $1 = 0
+    j       do_movemem                     TODO // Must keep $1 = 0
      sw     cmd_w1_dram, matrixStackPtr     // Update the matrix stack pointer
 
 g_mtx_push_ovl2:
